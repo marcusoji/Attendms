@@ -1,22 +1,15 @@
-# Node.js
-node_modules/
+# Dependencies
+/node_modules
+
+# Vercel local development and build output
+.vercel
+/dist
+
+# Environment variables
 .env
+.env*.local
 
 # Logs
-logs/
-*.log
-
-# OS files
-.DS_Store
-Thumbs.db
-
-# Vite/React
-dist/
-build/
-
-# IDE
-.vscode/
-.idea/
-
-# Uploaded files
-backend/uploads/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
