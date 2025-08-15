@@ -1,5 +1,5 @@
  // Enhanced JavaScript for organized attendance reports
-        const API_URL = '/api';
+        const API_URL = 'https://attendms.vercel.app/api';
         let currentUser = { type: null, token: null, info: {} };
         let currentUserType = 'student';
         let faceScanBlob = null;
