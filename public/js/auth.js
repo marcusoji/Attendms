@@ -1,5 +1,5 @@
  // Enhanced JavaScript for organized attendance reports
-        const API_URL = '';
+        const API_URL = '/api';
         let currentUser = { type: null, token: null, info: {} };
         let currentUserType = 'student';
         let faceScanBlob = null;
