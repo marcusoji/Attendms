@@ -144,23 +144,375 @@
                 displayMessage(statusElementId, "✅ Face Captured Successfully!", false);
                 stopCamera();
             }, 'image/jpeg');
-        }
+// Enhanced JavaScript for organized attendance reports
+const API_URL = '/api';
+let currentUser = { type: null, token: null, info: {} };
+let currentUserType = 'student';
+let faceScanBlob = null;
+let videoStream = null;
+let faceApiLoaded = false;
 
-        // API Functions
-        async function apiFetch(endpoint, options = {}) {
-            try {
-                const response = await fetch(API_URL + endpoint, options);
-                const responseData = await response.json();
-                if (!response.ok) {
-                    throw new Error(responseData.message || `HTTP error! status: ${response.status}`);
-                }
-                return responseData;
-            } catch (error) {
-                console.error(`API call to ${endpoint} failed:`, error);
-                throw new Error(error.message || 'A network error occurred. Please try again.');
+const pages = {
+    auth: document.getElementById('authPage'),
+    student: document.getElementById('studentDashboard'),
+    lecturer: document.getElementById('lecturerDashboard'),
+    admin: document.getElementById('adminDashboard')
+};
+
+// Load face-api.js (add this to your HTML head)
+async function loadFaceAPI() {
+    try {
+        await faceapi.nets.ssdMobilenetv1.loadFromUri('/models');
+        await faceapi.nets.faceLandmark68Net.loadFromUri('/models');
+        await faceapi.nets.faceRecognitionNet.loadFromUri('/models');
+        faceApiLoaded = true;
+        console.log('Face API loaded successfully');
+    } catch (error) {
+        console.error('Failed to load Face API:', error);
+        faceApiLoaded = false;
+    }
+}
+
+// Initialize face API on page load
+document.addEventListener('DOMContentLoaded', loadFaceAPI);
+
+// Utility Functions
+function navigate(page) {
+    Object.values(pages).forEach(p => p.classList.remove('active'));
+    if (pages[page]) pages[page].classList.add('active');
+}
+
+function displayMessage(elementId, message, isError = true) {
+    const el = document.getElementById(elementId);
+    if (el) {
+        el.textContent = message;
+        el.className = isError ? 'error-msg' : 'success-msg';
+    }
+}
+
+function clearMessages() {
+    document.querySelectorAll('.error-msg, .success-msg').forEach(el => el.textContent = '');
+    stopCamera();
+}
+
+function clearFaceScan() {
+    faceScanBlob = null;
+    document.querySelectorAll('[id$="Status"]').forEach(el => {
+        if (el.textContent.includes('Face Captured')) {
+            el.textContent = '';
+        }
+    });
+}
+
+// Authentication Functions
+function switchAuthMode(mode) {
+    clearMessages();
+    clearFaceScan();
+    
+    if (mode === 'login') {
+        document.getElementById('authToggleLogin').classList.add('active');
+        document.getElementById('authToggleRegister').classList.remove('active');
+        document.getElementById('loginForm').classList.remove('hidden');
+        document.getElementById('registerForm').classList.add('hidden');
+    } else {
+        document.getElementById('authToggleLogin').classList.remove('active');
+        document.getElementById('authToggleRegister').classList.add('active');
+        document.getElementById('loginForm').classList.add('hidden');
+        document.getElementById('registerForm').classList.remove('hidden');
+    }
+    const activeForm = document.querySelector(`#${mode}Form`);
+    switchUserType(activeForm.querySelector('.tab-btn'));
+}
+
+function switchUserType(btn) {
+    clearMessages();
+    const newUserType = btn.dataset.userType;
+    const wasStudent = currentUserType === 'student';
+    const isStudent = newUserType === 'student';
+    
+    if (wasStudent !== isStudent) {
+        clearFaceScan();
+    }
+    
+    currentUserType = newUserType;
+    
+    btn.parentElement.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+
+    const formContainer = btn.closest('div[id$="Form"]');
+    
+    formContainer.querySelectorAll('.form-fields').forEach(fieldSet => {
+        const forTypes = fieldSet.dataset.forType.split(' ');
+        const isVisible = forTypes.includes(currentUserType);
+        
+        if (isVisible) {
+            fieldSet.classList.remove('hidden');
+        } else {
+            fieldSet.classList.add('hidden');
+        }
+        
+        fieldSet.querySelectorAll('input, select').forEach(input => {
+            if (isVisible) {
+                input.required = true;
+                input.disabled = false;
+            } else {
+                input.required = false;
+                input.disabled = true;
+                input.value = '';
             }
+        });
+    });
+}
+
+// Camera Functions
+async function startCamera(videoElementId) {
+    stopCamera();
+    const videoPreview = document.getElementById(videoElementId);
+    videoPreview.style.display = 'block';
+    try {
+        videoStream = await navigator.mediaDevices.getUserMedia({ video: true });
+        videoPreview.srcObject = videoStream;
+    } catch (err) {
+        console.error("Camera Error:", err);
+        displayMessage(videoElementId.includes('login') ? 'loginError' : 'registerError', 'Could not access camera. Please grant permission.');
+    }
+}
+
+function stopCamera() {
+    if (videoStream) {
+        videoStream.getTracks().forEach(track => track.stop());
+        videoStream = null;
+    }
+    document.getElementById('video-preview-login').style.display = 'none';
+    document.getElementById('video-preview-register').style.display = 'none';
+}
+
+function captureFace(videoElementId, statusElementId) {
+    const videoPreview = document.getElementById(videoElementId);
+    if (!videoStream) {
+        displayMessage(statusElementId, "Camera not started. Please start the camera first.", true);
+        return;
+    }
+    const captureCanvas = document.getElementById('captureCanvas');
+    const context = captureCanvas.getContext('2d');
+    captureCanvas.width = videoPreview.videoWidth;
+    captureCanvas.height = videoPreview.videoHeight;
+    context.drawImage(videoPreview, 0, 0, captureCanvas.width, captureCanvas.height);
+    captureCanvas.toBlob(blob => {
+        faceScanBlob = blob;
+        displayMessage(statusElementId, "Face Captured Successfully!", false);
+        stopCamera();
+    }, 'image/jpeg');
+}
+
+// API Functions
+async function apiFetch(endpoint, options = {}) {
+    try {
+        const response = await fetch(API_URL + endpoint, options);
+        
+        // Check if the response is JSON
+        const contentType = response.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+            const textResponse = await response.text();
+            throw new Error(`Server returned non-JSON response: ${textResponse.substring(0, 100)}`);
         }
 
+        const responseData = await response.json();
+        if (!response.ok) {
+            throw new Error(responseData.message || `HTTP error! status: ${response.status}`);
+        }
+        return responseData;
+    } catch (error) {
+        console.error(`API call to ${endpoint} failed:`, error);
+        throw new Error(error.message || 'A network error occurred. Please try again.');
+    }
+}
+
+// Login Handlers
+async function handleLecturerAdminLogin() {
+    const loginForm = document.getElementById('login-form-element');
+    const email = loginForm.elements.email.value;
+    const password = loginForm.elements.password.value;
+    
+    if (!email || !password) {
+        throw new Error('Email and Password are required.');
+    }
+    
+    const result = await apiFetch('/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userType: currentUserType, email, password })
+    });
+    
+    loginSuccess(result.token, result.user);
+}
+
+async function handleStudentFaceLogin() {
+    if (!faceApiLoaded) {
+        throw new Error("Face recognition is still loading. Please wait.");
+    }
+    if (!faceScanBlob) {
+        throw new Error("Please capture your face to log in.");
+    }
+
+    const loginForm = document.getElementById('login-form-element');
+    const matNo = loginForm.elements.matNo.value;
+    if (!matNo) {
+        throw new Error("Matriculation Number is required.");
+    }
+
+    displayMessage('loginError', 'Verifying face... Please wait.', false);
+
+    // Step 1: Get the registered face scan data from the server
+    const studentData = await apiFetch('/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userType: 'student', matNo })
+    });
+
+    if (!studentData.faceScanData) {
+        throw new Error("No registered face scan found for this student.");
+    }
+
+    // Step 2: Create an image element from the registered Base64 data
+    const registeredImage = new Image();
+    registeredImage.src = `data:image/jpeg;base64,${studentData.faceScanData}`;
+    await new Promise(resolve => registeredImage.onload = resolve);
+    
+    // Step 3: Create an image element from the live captured blob
+    const liveImage = await faceapi.bufferToImage(faceScanBlob);
+
+    // Step 4: Get face descriptors for both images
+    const registeredDetections = await faceapi.detectSingleFace(registeredImage).withFaceLandmarks().withFaceDescriptor();
+    const liveDetections = await faceapi.detectSingleFace(liveImage).withFaceLandmarks().withFaceDescriptor();
+
+    if (!registeredDetections || !liveDetections) {
+        throw new Error("Could not detect a face in one of the images. Please ensure your face is clear and try again.");
+    }
+
+    // Step 5: Compare the two face descriptors
+    const faceMatcher = new faceapi.FaceMatcher(registeredDetections);
+    const bestMatch = faceMatcher.findBestMatch(liveDetections.descriptor);
+
+    // Using a threshold of 0.5 for higher accuracy
+    if (bestMatch.label === 'person 1' && bestMatch.distance < 0.5) { 
+        displayMessage('loginSuccess', 'Face match successful! Logging in...', false);
+        loginSuccess(studentData.token, studentData.user);
+    } else {
+        throw new Error(`Face does not match. (Similarity score: ${((1 - bestMatch.distance) * 100).toFixed(2)}%)`);
+    }
+}
+
+function loginSuccess(token, userInfo) {
+    currentUser.token = token;
+    currentUser.info = userInfo;
+    currentUser.type = currentUserType;
+    
+    // Don't use localStorage in artifacts - would cause failure
+    // localStorage.setItem('attendanceUser', JSON.stringify(currentUser));
+
+    if (currentUser.type === 'student') {
+        document.getElementById('studentWelcome').textContent = `Welcome, ${currentUser.info.name}!`;
+        navigate('student');
+    } else if (currentUser.type === 'lecturer') {
+        document.getElementById('lecturerWelcome').textContent = `Welcome, ${currentUser.info.name}!`;
+        loadLecturerData();
+        navigate('lecturer');
+    } else if (currentUser.type === 'admin') {
+        navigate('admin');
+    }
+}
+
+// Event Handlers
+document.addEventListener('DOMContentLoaded', function() {
+    // Login form handler
+    const loginForm = document.getElementById('login-form-element');
+    if (loginForm) {
+        loginForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            clearMessages();
+            try {
+                if (currentUserType === 'student') {
+                    await handleStudentFaceLogin();
+                } else {
+                    await handleLecturerAdminLogin();
+                }
+            } catch (error) {
+                displayMessage('loginError', error.message);
+            }
+        });
+    }
+
+    // Registration form handler
+    const registerForm = document.getElementById('register-form-element');
+    if (registerForm) {
+        registerForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            clearMessages();
+            try {
+                if (currentUserType === 'student') {
+                    if (!faceScanBlob) throw new Error('Please capture your face.');
+                    const formData = new FormData(registerForm);
+                    formData.append('userType', currentUserType);
+                    formData.append('faceScan', faceScanBlob, 'face.jpg');
+                    const response = await fetch(`${API_URL}/register`, { method: 'POST', body: formData });
+                    const result = await response.json();
+                    if (!response.ok) throw new Error(result.message);
+                } else if (currentUserType === 'lecturer') {
+                    const lecturerSection = registerForm.querySelector('.form-fields[data-for-type="lecturer"]:not(.hidden)');
+                    
+                    if (!lecturerSection) {
+                        throw new Error('Lecturer form section not found or is hidden');
+                    }
+                    
+                    const lecturerInputs = lecturerSection.querySelectorAll('input');
+                    const lecturerData = { userType: 'lecturer' };
+                    
+                    lecturerInputs.forEach(input => {
+                        lecturerData[input.name] = input.value;
+                    });
+                    
+                    const requiredFields = ['name', 'lecturer_id', 'email', 'phone', 'password'];
+                    const missingFields = requiredFields.filter(field => !lecturerData[field] || lecturerData[field].trim() === '');
+                    
+                    if (missingFields.length > 0) {
+                        throw new Error(`Missing required fields: ${missingFields.join(', ')}`);
+                    }
+                    
+                    const response = await fetch(`${API_URL}/register/lecturer`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(lecturerData)
+                    });
+                    
+                    const result = await response.json();
+                    if (!response.ok) throw new Error(result.message);
+                }
+                
+                displayMessage('registerSuccess', 'Registration successful! Please login.', false);
+                clearFaceScan();
+                setTimeout(() => switchAuthMode('login'), 2000);
+            } catch (error) {
+                displayMessage('registerError', error.message);
+            }
+        });
+    }
+});
+
+function logout() {
+    currentUser = { type: null, token: null, info: {} };
+    clearFaceScan();
+    navigate('auth');
+}
+
+function init() {
+    // Initialize the auth mode
+    navigate('auth');
+    switchAuthMode('login');
+}
+
+// Initialize on page load
+init();
         // Enhanced Lecturer Functions
         async function loadLecturerData() {
             try {
@@ -601,155 +953,7 @@
             }
         }
 
-        // Registration Handler
-       registerForm.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    clearMessages();
-    try {
-        if (currentUserType === 'student') {
-            if (!faceScanBlob) throw new Error('Please capture your face.');
-            const formData = new FormData(registerForm);
-            formData.append('userType', currentUserType);
-            formData.append('faceScan', faceScanBlob, 'face.jpg');
-            const response = await fetch(`${API_URL}/register`, { method: 'POST', body: formData });
-            const result = await response.json();
-            if (!response.ok) throw new Error(result.message);
-                } else if (currentUserType === 'lecturer') {
-                    const lecturerSection = registerForm.querySelector('.form-fields[data-for-type="lecturer"]:not(.hidden)');
-                    
-                    if (!lecturerSection) {
-                        throw new Error('Lecturer form section not found or is hidden');
-                    }
-                    
-                    const lecturerInputs = lecturerSection.querySelectorAll('input');
-                    const lecturerData = { userType: 'lecturer' };
-                    
-                    lecturerInputs.forEach(input => {
-                        lecturerData[input.name] = input.value;
-                    });
-                    
-                    const requiredFields = ['name', 'lecturer_id', 'email', 'phone', 'password'];
-                    const missingFields = requiredFields.filter(field => !lecturerData[field] || lecturerData[field].trim() === '');
-                    
-                    if (missingFields.length > 0) {
-                        throw new Error(`Missing required fields: ${missingFields.join(', ')}`);
-                    }
-                    
-                    const response = await fetch(`${API_URL}/register/lecturer`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(lecturerData)
-                    });
-                    
-                    const result = await response.json();
-                    if (!response.ok) throw new Error(result.message);
-                }
-                
-                displayMessage('registerSuccess', 'Registration successful! Please login.', false);
-                clearFaceScan();
-                setTimeout(() => switchAuthMode('login'), 2000);
-            } catch (error) {
-                displayMessage('registerError', error.message);
-            }
-        });
-
-        // Login Handler
-       loginForm.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    clearMessages();
-    try {
-        if (currentUserType === 'student') {
-            await handleStudentFaceLogin();
-        } else {
-            await handleLecturerAdminLogin();
-        }
-    } catch (error) {
-        displayMessage('loginError', error.message);
-    }
-});
-
-async function handleLecturerAdminLogin() {
-    const email = loginForm.elements.email.value;
-    const password = loginForm.elements.password.value;
-    if (!email || !password) throw new Error('Email and Password are required.');
-    
-    const result = await apiFetch('/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userType: currentUserType, email, password })
-    });
-    
-    loginSuccess(result.token, result.user);
-}
-
-// REPLACE the ENTIRE handleStudentFaceLogin function with this new version:
-async function handleStudentFaceLogin() {
-    if (!faceApiLoaded) throw new Error("Face recognition is still loading. Please wait.");
-    if (!faceScanBlob) throw new Error("Please capture your face to log in.");
-
-    const matNo = loginForm.elements.matNo.value;
-    if (!matNo) throw new Error("Matriculation Number is required.");
-
-    displayMessage('loginError', 'Verifying face... Please wait.', false);
-
-    // Step 1: Get the registered face scan data from the server
-    const studentData = await apiFetch('/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userType: 'student', matNo })
-    });
-
-    if (!studentData.faceScanData) {
-        throw new Error("No registered face scan found for this student.");
-    }
-
-    // Step 2: Create an image element from the registered Base64 data
-    const registeredImage = new Image();
-    registeredImage.src = `data:image/jpeg;base64,${studentData.faceScanData}`;
-    await new Promise(resolve => registeredImage.onload = resolve);
-    
-    // Step 3: Create an image element from the live captured blob
-    const liveImage = await faceapi.bufferToImage(faceScanBlob);
-
-    // Step 4: Get face descriptors for both images
-    const registeredDetections = await faceapi.detectSingleFace(registeredImage).withFaceLandmarks().withFaceDescriptor();
-    const liveDetections = await faceapi.detectSingleFace(liveImage).withFaceLandmarks().withFaceDescriptor();
-
-    if (!registeredDetections || !liveDetections) {
-        throw new Error("Could not detect a face in one of the images. Please ensure your face is clear and try again.");
-    }
-
-    // Step 5: Compare the two face descriptors
-    const faceMatcher = new faceapi.FaceMatcher(registeredDetections);
-    const bestMatch = faceMatcher.findBestMatch(liveDetections.descriptor);
-
-    // Using a threshold of 0.5 for higher accuracy
-    if (bestMatch.label === 'person 1' && bestMatch.distance < 0.5) { 
-        displayMessage('loginSuccess', 'Face match successful! Logging in...', false);
-        loginSuccess(studentData.token, studentData.user);
-    } else {
-        throw new Error(`Face does not match. (Similarity score: ${((1 - bestMatch.distance) * 100).toFixed(2)}%)`);
-    }
-}
-
-function loginSuccess(token, userInfo) {
-    currentUser.token = token;
-    currentUser.info = userInfo;
-    currentUser.type = currentUserType;
-    localStorage.setItem('attendanceUser', JSON.stringify(currentUser));
-
-    if (currentUser.type === 'student') {
-        document.getElementById('studentWelcome').textContent = `Welcome, ${currentUser.info.name}!`;
-        navigate('student');
-    } else if (currentUser.type === 'lecturer') {
-        document.getElementById('lecturerWelcome').textContent = `Welcome, ${currentUser.info.name}!`;
-        loadLecturerData();
-        navigate('lecturer');
-    } else if (currentUser.type === 'admin') {
-        navigate('admin');
-    }
-}
-        // Other Event Handlers
+        
         courseForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             const courseCode = e.target.courseCode.value;
@@ -820,37 +1024,4 @@ function loginSuccess(token, userInfo) {
             });
         });
 
-        function logout() {
-            localStorage.removeItem('attendanceUser');
-            currentUser = { type: null, token: null, info: {} };
-            clearFaceScan();
-            navigate('auth');
-        }
-
-        function init() {
-            const storedUser = localStorage.getItem('attendanceUser');
-            if (storedUser) {
-                try {
-                    currentUser = JSON.parse(storedUser);
-                    if (currentUser.type === 'student') {
-                        document.getElementById('studentWelcome').textContent = `Welcome back, ${currentUser.info.name}! 👋`;
-                        navigate('student');
-                    } else if (currentUser.type === 'lecturer') {
-                        document.getElementById('lecturerWelcome').textContent = `Welcome back, ${currentUser.info.name}! 👨‍🏫`;
-                        loadLecturerData();
-                        navigate('lecturer');
-                    } else if(currentUser.type === 'admin') {
-                        navigate('admin');
-                    } else {
-                        logout();
-                    }
-                } catch (e) {
-                    logout();
-                }
-            } else {
-                navigate('auth');
-            }
-            switchAuthMode('login');
-        }
         
-        init();
