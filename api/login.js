@@ -1,29 +1,27 @@
-// api/login.js (for Vercel serverless functions)
+// api/login.js
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const mysql = require('mysql2/promise');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret';
+const JWT_SECRET = process.env.JWT_SECRET || 'your-fallback-secret';
 
-// Database connection function
+// Add connection pool for better performance
+let connectionPool;
+
 async function getDbConnection() {
-    return await mysql.createConnection({
-        host: process.env.DB_HOST,
-        user: process.env.DB_USER,
-        password: process.env.DB_PASSWORD,
-        database: process.env.DB_NAME
-    });
-}
-
-// Utility functions
-const asyncHandler = (fn) => async (req, res) => {
-    try {
-        await fn(req, res);
-    } catch (error) {
-        console.error('API Error:', error);
-        res.status(500).json({ message: error.message || 'Internal server error' });
+    if (!connectionPool) {
+        connectionPool = mysql.createPool({
+            host: process.env.DB_HOST,
+            user: process.env.DB_USER,
+            password: process.env.DB_PASSWORD,
+            database: process.env.DB_NAME,
+            waitForConnections: true,
+            connectionLimit: 10,
+            queueLimit: 0
+        });
     }
-};
+    return connectionPool;
+}
 
 const validateInput = (body, requiredFields) => {
     for (const field of requiredFields) {
@@ -34,31 +32,37 @@ const validateInput = (body, requiredFields) => {
     return null;
 };
 
-const log = (level, message, data = {}) => {
-    const timestamp = new Date().toISOString();
-    console.log(`[${timestamp}] ${level.toUpperCase()}: ${message}`, data);
-};
-
-const handler = asyncHandler(async (req, res) => {
-    // Add CORS headers
+module.exports = async (req, res) => {
+    // Set CORS headers first
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
     
     if (req.method === 'OPTIONS') {
-        res.status(200).end();
-        return;
+        return res.status(200).end();
     }
 
     if (req.method !== 'POST') {
         return res.status(405).json({ message: 'Method Not Allowed' });
     }
 
-    const db = await getDbConnection();
-    
+    let db;
     try {
+        // Validate request body exists
+        if (!req.body) {
+            return res.status(400).json({ message: 'Request body is required' });
+        }
+
         const { userType, matNo, email, password } = req.body;
-        log('info', 'Login attempt', { userType });
+        
+        if (!userType) {
+            return res.status(400).json({ message: 'User type is required' });
+        }
+
+        console.log('Login attempt for:', { userType, matNo: matNo || 'N/A', email: email || 'N/A' });
+
+        // Get database connection
+        db = await getDbConnection();
 
         if (userType === 'student') {
             if (!matNo) {
@@ -66,6 +70,7 @@ const handler = asyncHandler(async (req, res) => {
             }
 
             const [students] = await db.query('SELECT * FROM students WHERE mat_no = ?', [matNo.trim()]);
+            
             if (students.length === 0) {
                 return res.status(404).json({ message: 'Student not found' });
             }
@@ -77,14 +82,18 @@ const handler = asyncHandler(async (req, res) => {
                 { expiresIn: '24h' }
             );
             
-            res.json({
+            return res.status(200).json({
                 message: 'Student data retrieved for face verification',
                 token,
                 faceScanData: student.face_scan_path,
-                user: { id: student.id, name: student.name, mat_no: student.mat_no }
+                user: { 
+                    id: student.id, 
+                    name: student.name, 
+                    mat_no: student.mat_no 
+                }
             });
 
-        } else { // Lecturer or Admin
+        } else if (userType === 'lecturer' || userType === 'admin') {
             const validationError = validateInput(req.body, ['email', 'password']);
             if (validationError) {
                 return res.status(400).json({ message: validationError });
@@ -110,12 +119,26 @@ const handler = asyncHandler(async (req, res) => {
                 { expiresIn: '24h' }
             );
             
-            delete user.password_hash;
-            res.json({ message: 'Login successful', token, user });
+            // Remove password hash before sending
+            const userResponse = { ...user };
+            delete userResponse.password_hash;
+            
+            return res.status(200).json({ 
+                message: 'Login successful', 
+                token, 
+                user: userResponse 
+            });
+        } else {
+            return res.status(400).json({ message: 'Invalid user type' });
         }
-    } finally {
-        await db.end();
-    }
-});
 
-module.exports = handler;
+    } catch (error) {
+        console.error('Login API Error:', error);
+        
+        // Return proper JSON error response
+        return res.status(500).json({ 
+            message: 'Internal server error',
+            error: process.env.NODE_ENV === 'development' ? error.message : 'Something went wrong'
+        });
+    }
+};
