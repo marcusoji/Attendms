@@ -66,7 +66,6 @@ function switchAuthMode(mode) {
     }
 }
 
-function switchUserType(btn) {
 // Corrected switchUserType function
 function switchUserType(btn) {
     clearMessages();
