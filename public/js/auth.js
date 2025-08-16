@@ -124,30 +124,7 @@ function init() {
     setupEventHandlers();
 }
 
-// Make sure init runs when DOM is loaded
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
-} else {
-    // DOM is already loaded
-    init();
-}
-    // Set initial user type for login form
-    const loginFirstTab = document.querySelector('#loginForm .tab-btn');
-    if (loginFirstTab) {
-        loginFirstTab.classList.add('active');
-        switchUserType(loginFirstTab);
-    }
-    
-    // Set initial user type for register form
-    const registerFirstTab = document.querySelector('#registerForm .tab-btn');
-    if (registerFirstTab) {
-        registerFirstTab.classList.add('active');
-        switchUserType(registerFirstTab);
-    }
-    
-    // Setup all event handlers after DOM is ready
-    setupEventHandlers();
-}
+
 // Camera Functions
 async function startCamera(videoElementId) {
     stopCamera();
