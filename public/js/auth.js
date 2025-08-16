@@ -129,15 +129,18 @@ function init() {
 async function startCamera(videoElementId) {
     stopCamera();
     const videoPreview = document.getElementById(videoElementId);
-    if (videoPreview) {
+    if (!videoPreview) return;
+
+    try {
         videoPreview.style.display = 'block';
-        try {
-            videoStream = await navigator.mediaDevices.getUserMedia({ video: true });
-            videoPreview.srcObject = videoStream;
-        } catch (err) {
-            console.error("Camera Error:", err);
-            displayMessage(videoElementId.includes('login') ? 'loginError' : 'registerError', 'Could not access camera. Please grant permission.');
-        }
+        videoStream = await navigator.mediaDevices.getUserMedia({ 
+            video: { facingMode: 'user' } // Front camera by default
+        });
+        videoPreview.srcObject = videoStream;
+    } catch (err) {
+        console.error("Camera Error:", err);
+        const errorType = videoElementId.includes('login') ? 'loginError' : 'registerError';
+        displayMessage(errorType, 'Camera access denied. Enable permissions in browser settings.');
     }
 }
 
@@ -146,35 +149,34 @@ function stopCamera() {
         videoStream.getTracks().forEach(track => track.stop());
         videoStream = null;
     }
-    const videoLogin = document.getElementById('video-preview-login');
-    const videoRegister = document.getElementById('video-preview-register');
-    if (videoLogin) videoLogin.style.display = 'none';
-    if (videoRegister) videoRegister.style.display = 'none';
+    document.querySelectorAll('[id^="video-preview-"]').forEach(el => {
+        el.style.display = 'none';
+    });
 }
 
 function captureFace(videoElementId, statusElementId) {
     const videoPreview = document.getElementById(videoElementId);
-    const captureCanvas = document.getElementById('captureCanvas');
-    
-    if (!videoStream) {
-        displayMessage(statusElementId, "Camera not started. Please start the camera first.", true);
-        return;
-    }
-    
-    if (!captureCanvas || !videoPreview) {
-        displayMessage(statusElementId, "Required elements not found.", true);
+    const captureCanvas = document.createElement('canvas'); // Dynamic canvas
+    const ctx = captureCanvas.getContext('2d');
+
+    if (!videoStream || videoPreview.readyState < 2) {
+        displayMessage(statusElementId, "Initialize camera first", true);
         return;
     }
 
-    const context = captureCanvas.getContext('2d');
     captureCanvas.width = videoPreview.videoWidth;
     captureCanvas.height = videoPreview.videoHeight;
-    context.drawImage(videoPreview, 0, 0, captureCanvas.width, captureCanvas.height);
+    ctx.drawImage(videoPreview, 0, 0);
+
     captureCanvas.toBlob(blob => {
+        if (!blob) {
+            displayMessage(statusElementId, "Capture failed", true);
+            return;
+        }
         faceScanBlob = blob;
-        displayMessage(statusElementId, "Face Captured Successfully!", false);
+        displayMessage(statusElementId, "Face captured!", false);
         stopCamera();
-    }, 'image/jpeg');
+    }, 'image/jpeg', 0.95); // 95% quality
 }
 
 // API Functions
