@@ -3,7 +3,6 @@ const bcrypt = require('bcrypt');
 const multer = require('multer');
 const mysql = require('mysql2/promise');
 
-// Use memory storage for file uploads
 const upload = multer({ storage: multer.memoryStorage() });
 
 let connectionPool;
@@ -12,12 +11,16 @@ async function getDbConnection() {
     if (!connectionPool) {
         connectionPool = mysql.createPool({
             host: process.env.DB_HOST,
+            port: parseInt(process.env.DB_PORT) || 3306,  // Added port
             user: process.env.DB_USER,
             password: process.env.DB_PASSWORD,
             database: process.env.DB_NAME,
             waitForConnections: true,
-            connectionLimit: 10,
-            queueLimit: 0
+            connectionLimit: 5,
+            queueLimit: 0,
+            acquireTimeout: 60000,
+            timeout: 60000,
+            reconnect: true
         });
     }
     return connectionPool;
@@ -35,7 +38,6 @@ const runMiddleware = (req, res, fn) => {
 };
 
 module.exports = async (req, res) => {
-    // Set CORS headers first
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
@@ -49,17 +51,15 @@ module.exports = async (req, res) => {
     }
 
     try {
-        // Handle multipart form data
         await runMiddleware(req, res, upload.single('faceScan'));
-
-        console.log('Registration attempt - body:', req.body);
-        console.log('Registration attempt - file:', req.file ? 'File present' : 'No file');
 
         const { userType, name, matNo, email, phone, lecturer_id, password } = req.body;
         
         if (!userType) {
             return res.status(400).json({ message: 'User type is required' });
         }
+
+        console.log('Registration attempt for:', userType);
 
         const db = await getDbConnection();
 
@@ -68,18 +68,10 @@ module.exports = async (req, res) => {
             
             if (!name || !matNo || !email || !phone || !faceScanFile) {
                 return res.status(400).json({ 
-                    message: 'All fields and face scan are required for student registration',
-                    received: {
-                        name: !!name,
-                        matNo: !!matNo,
-                        email: !!email,
-                        phone: !!phone,
-                        faceScan: !!faceScanFile
-                    }
+                    message: 'All fields and face scan are required for student registration'
                 });
             }
             
-            // Check for existing student
             const [existing] = await db.query(
                 'SELECT id FROM students WHERE mat_no = ? OR email = ?', 
                 [matNo.trim(), email.trim()]
@@ -91,7 +83,6 @@ module.exports = async (req, res) => {
                 });
             }
 
-            // Convert image buffer to Base64
             const faceScanBase64 = faceScanFile.buffer.toString('base64');
 
             await db.query(
@@ -99,6 +90,47 @@ module.exports = async (req, res) => {
                 [matNo.trim(), name.trim(), email.trim(), phone.trim(), faceScanBase64]
             );
 
+            return res.status(201).json({ message: 'Student registered successfully!' });
+
+        } else if (userType === 'lecturer') {
+            if (!name || !lecturer_id || !email || !phone || !password) {
+                return res.status(400).json({ 
+                    message: 'All fields are required for lecturer registration'
+                });
+            }
+            
+            const [existing] = await db.query(
+                'SELECT id FROM lecturers WHERE lecturer_id = ? OR email = ?', 
+                [lecturer_id.trim(), email.trim()]
+            );
+            
+            if (existing.length > 0) {
+                return res.status(409).json({ 
+                    message: 'Lecturer with this ID or Email already exists' 
+                });
+            }
+            
+            const hashedPassword = await bcrypt.hash(password.trim(), 10);
+            
+            await db.query(
+                'INSERT INTO lecturers (lecturer_id, name, email, phone, password_hash) VALUES (?, ?, ?, ?, ?)',
+                [lecturer_id.trim(), name.trim(), email.trim(), phone.trim(), hashedPassword]
+            );
+            
+            return res.status(201).json({ message: 'Lecturer registered successfully!' });
+            
+        } else {
+            return res.status(400).json({ message: 'Invalid user type provided' });
+        }
+
+    } catch (error) {
+        console.error('Registration API Error:', error);
+        return res.status(500).json({ 
+            message: 'Database connection failed',
+            error: error.message
+        });
+    }
+};
             return res.status(201).json({ message: 'Student registered successfully!' });
 
         } else if (userType === 'lecturer') {
