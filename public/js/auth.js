@@ -774,9 +774,7 @@ async function printCourseReport() {
             apiFetch(`/courses/${courseId}/stats`, {
                 headers: { 'Authorization': `Bearer ${currentUser.token}` }
             }),
-            apiFetch(`/attendance/${courseId}/sessions`, {
-                headers: { 'Authorization': `Bearer ${currentUser.token}` }
-            })
+            
         ]);
 
         const printWindow = window.open('', '_blank');
