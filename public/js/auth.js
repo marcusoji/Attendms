@@ -940,4 +940,4 @@ function logout() {
     navigate('auth');
 }
 
- the page to log out.
+ 
