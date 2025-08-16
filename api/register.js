@@ -1,20 +1,27 @@
-// api/register.js (for Vercel serverless functions)
+// api/register.js
 const bcrypt = require('bcrypt');
 const multer = require('multer');
 const mysql = require('mysql2/promise');
 
-// Database connection function
-async function getDbConnection() {
-    return await mysql.createConnection({
-        host: process.env.DB_HOST,
-        user: process.env.DB_USER,
-        password: process.env.DB_PASSWORD,
-        database: process.env.DB_NAME
-    });
-}
-
-// Use memory storage to get the file buffer
+// Use memory storage for file uploads
 const upload = multer({ storage: multer.memoryStorage() });
+
+let connectionPool;
+
+async function getDbConnection() {
+    if (!connectionPool) {
+        connectionPool = mysql.createPool({
+            host: process.env.DB_HOST,
+            user: process.env.DB_USER,
+            password: process.env.DB_PASSWORD,
+            database: process.env.DB_NAME,
+            waitForConnections: true,
+            connectionLimit: 10,
+            queueLimit: 0
+        });
+    }
+    return connectionPool;
+}
 
 const runMiddleware = (req, res, fn) => {
     return new Promise((resolve, reject) => {
@@ -27,53 +34,52 @@ const runMiddleware = (req, res, fn) => {
     });
 };
 
-// Utility functions
-const asyncHandler = (fn) => async (req, res) => {
-    try {
-        await fn(req, res);
-    } catch (error) {
-        console.error('API Error:', error);
-        res.status(500).json({ message: error.message || 'Internal server error' });
-    }
-};
-
-const log = (level, message, data = {}) => {
-    const timestamp = new Date().toISOString();
-    console.log(`[${timestamp}] ${level.toUpperCase()}: ${message}`, data);
-};
-
-const handler = asyncHandler(async (req, res) => {
-    // Add CORS headers
+module.exports = async (req, res) => {
+    // Set CORS headers first
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
     
     if (req.method === 'OPTIONS') {
-        res.status(200).end();
-        return;
+        return res.status(200).end();
     }
 
     if (req.method !== 'POST') {
         return res.status(405).json({ message: 'Method Not Allowed' });
     }
 
-    // Handle multipart form data for file uploads
-    await runMiddleware(req, res, upload.single('faceScan'));
-
-    const db = await getDbConnection();
-    
     try {
+        // Handle multipart form data
+        await runMiddleware(req, res, upload.single('faceScan'));
+
+        console.log('Registration attempt - body:', req.body);
+        console.log('Registration attempt - file:', req.file ? 'File present' : 'No file');
+
         const { userType, name, matNo, email, phone, lecturer_id, password } = req.body;
-        log('info', 'Registration attempt', { userType });
+        
+        if (!userType) {
+            return res.status(400).json({ message: 'User type is required' });
+        }
+
+        const db = await getDbConnection();
 
         if (userType === 'student') {
             const faceScanFile = req.file;
+            
             if (!name || !matNo || !email || !phone || !faceScanFile) {
                 return res.status(400).json({ 
-                    message: 'All fields and face scan are required for student registration' 
+                    message: 'All fields and face scan are required for student registration',
+                    received: {
+                        name: !!name,
+                        matNo: !!matNo,
+                        email: !!email,
+                        phone: !!phone,
+                        faceScan: !!faceScanFile
+                    }
                 });
             }
             
+            // Check for existing student
             const [existing] = await db.query(
                 'SELECT id FROM students WHERE mat_no = ? OR email = ?', 
                 [matNo.trim(), email.trim()]
@@ -98,10 +104,18 @@ const handler = asyncHandler(async (req, res) => {
         } else if (userType === 'lecturer') {
             if (!name || !lecturer_id || !email || !phone || !password) {
                 return res.status(400).json({ 
-                    message: 'All fields are required for lecturer registration' 
+                    message: 'All fields are required for lecturer registration',
+                    received: {
+                        name: !!name,
+                        lecturer_id: !!lecturer_id,
+                        email: !!email,
+                        phone: !!phone,
+                        password: !!password
+                    }
                 });
             }
             
+            // Check for existing lecturer
             const [existing] = await db.query(
                 'SELECT id FROM lecturers WHERE lecturer_id = ? OR email = ?', 
                 [lecturer_id.trim(), email.trim()]
@@ -114,6 +128,7 @@ const handler = asyncHandler(async (req, res) => {
             }
             
             const hashedPassword = await bcrypt.hash(password.trim(), 10);
+            
             await db.query(
                 'INSERT INTO lecturers (lecturer_id, name, email, phone, password_hash) VALUES (?, ?, ?, ?, ?)',
                 [lecturer_id.trim(), name.trim(), email.trim(), phone.trim(), hashedPassword]
@@ -124,9 +139,14 @@ const handler = asyncHandler(async (req, res) => {
         } else {
             return res.status(400).json({ message: 'Invalid user type provided' });
         }
-    } finally {
-        await db.end();
-    }
-});
 
-module.exports = handler;
+    } catch (error) {
+        console.error('Registration API Error:', error);
+        
+        // Return proper JSON error response
+        return res.status(500).json({ 
+            message: 'Internal server error',
+            error: process.env.NODE_ENV === 'development' ? error.message : 'Something went wrong'
+        });
+    }
+};
