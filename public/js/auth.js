@@ -67,6 +67,8 @@ function switchAuthMode(mode) {
 }
 
 function switchUserType(btn) {
+// Corrected switchUserType function
+function switchUserType(btn) {
     clearMessages();
     const newUserType = btn.dataset.userType;
     const wasStudent = currentUserType === 'student';
@@ -78,21 +80,28 @@ function switchUserType(btn) {
 
     currentUserType = newUserType;
 
-    btn.parentElement.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    // Update active tab
+    const tabContainer = btn.parentElement;
+    tabContainer.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
 
-    const formContainer = btn.closest('div[id$="Form"]');
+    // Find the parent form container (login or register)
+    const formContainer = btn.closest('.card');
+    if (!formContainer) return;
 
+    // Process all form fields in this container
     formContainer.querySelectorAll('.form-fields').forEach(fieldSet => {
         const forTypes = fieldSet.dataset.forType.split(' ');
         const isVisible = forTypes.includes(currentUserType);
-
+        
+        // Toggle visibility
         if (isVisible) {
             fieldSet.classList.remove('hidden');
         } else {
             fieldSet.classList.add('hidden');
         }
-
+        
+        // Update input states
         fieldSet.querySelectorAll('input, select').forEach(input => {
             if (isVisible) {
                 input.required = true;
@@ -106,6 +115,40 @@ function switchUserType(btn) {
     });
 }
 
+// Enhanced init function
+function init() {
+    // Initialize the auth mode first
+    navigate('auth');
+    switchAuthMode('login');
+    
+    // Setup all event handlers after DOM is ready
+    setupEventHandlers();
+}
+
+// Make sure init runs when DOM is loaded
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+} else {
+    // DOM is already loaded
+    init();
+}
+    // Set initial user type for login form
+    const loginFirstTab = document.querySelector('#loginForm .tab-btn');
+    if (loginFirstTab) {
+        loginFirstTab.classList.add('active');
+        switchUserType(loginFirstTab);
+    }
+    
+    // Set initial user type for register form
+    const registerFirstTab = document.querySelector('#registerForm .tab-btn');
+    if (registerFirstTab) {
+        registerFirstTab.classList.add('active');
+        switchUserType(registerFirstTab);
+    }
+    
+    // Setup all event handlers after DOM is ready
+    setupEventHandlers();
+}
 // Camera Functions
 async function startCamera(videoElementId) {
     stopCamera();
@@ -898,22 +941,4 @@ function logout() {
     navigate('auth');
 }
 
-function init() {
-    // Initialize the auth mode first
-    navigate('auth');
-    switchAuthMode('login');
-    
-    // Setup all event handlers after DOM is ready
-    setupEventHandlers();
-}
-
-// Make sure init runs when DOM is loaded
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
-} else {
-    // DOM is already loaded
-    init();
-                }
-// ADD THIS CODE TO THE END OF js/auth.js
-
-// This function was missing. It reloads the page to log out.
+ the page to log out.
