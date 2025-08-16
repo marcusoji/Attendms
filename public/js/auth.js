@@ -14,29 +14,6 @@ const pages = {
 };
 
 // Initialize face API loading
-async function loadFaceAPI() {
-    try {
-        if (typeof faceapi !== 'undefined') {
-            await faceapi.nets.ssdMobilenetv1.loadFromUri('/models');
-            await faceapi.nets.faceLandmark68Net.loadFromUri('/models');
-            await faceapi.nets.faceRecognitionNet.loadFromUri('/models');
-            faceApiLoaded = true;
-            console.log('Face API loaded successfully');
-        } else {
-            console.warn('Face API not available');
-            faceApiLoaded = false;
-        }
-    } catch (error) {
-        console.error('Failed to load Face API:', error);
-        faceApiLoaded = false;
-    }
-}
-
-// Load face API when DOM is ready
-document.addEventListener('DOMContentLoaded', () => {
-    loadFaceAPI();
-    init();
-});
 
 // Utility Functions
 function navigate(page) {
@@ -937,3 +914,6 @@ if (document.readyState === 'loading') {
     // DOM is already loaded
     init();
                 }
+// ADD THIS CODE TO THE END OF js/auth.js
+
+// This function was missing. It reloads the page to log out.
