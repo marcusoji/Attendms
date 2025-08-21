@@ -1,22 +1,21 @@
-# Node.js
+# Node.js dependencies
 node_modules/
-.env
 
 # Logs
-logs/
-*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
 
-# OS files
-.DS_Store
-Thumbs.db
+# Environment variables
+.env
 
-# Vite/React
+# Build artifacts (if you use React/Vue later)
 dist/
 build/
 
-# IDE
-.vscode/
-.idea/
+# OS-specific
+.DS_Store
+Thumbs.dbh
 
 # Uploaded files
 backend/uploads/
