@@ -758,6 +758,7 @@ async function handleLecturerAdminLogin() {
 }
 
 // REPLACE the ENTIRE handleStudentFaceLogin function with this new version:
+// FIXED handleStudentFaceLogin function with stricter matching
 async function handleStudentFaceLogin() {
     if (!faceApiLoaded) throw new Error("Face recognition is still loading. Please wait.");
     if (!faceScanBlob) throw new Error("Please capture your face to log in.");
@@ -785,39 +786,175 @@ async function handleStudentFaceLogin() {
 
         displayMessage('loginError', 'Analyzing faces... Please wait.', false);
 
-        // Step 3: Try multiple detection methods with different sensitivities
-        const registeredDetections = await tryMultipleDetectionMethods(registeredImage, 'registered');
-        const liveDetections = await tryMultipleDetectionMethods(liveImage, 'live');
+        // Step 3: Use stricter detection with higher confidence
+        const registeredDetections = await detectFaceWithHighConfidence(registeredImage, 'registered');
+        const liveDetections = await detectFaceWithHighConfidence(liveImage, 'live');
 
         // Provide specific feedback about which image failed
-        if (!registeredDetections && !liveDetections) {
-            throw new Error("Could not detect faces in both images. Try:\n1. Better lighting\n2. Look directly at camera\n3. Move closer to camera\n4. Remove glasses/hat if wearing");
-        } else if (!registeredDetections) {
+        if (!registeredDetections) {
             throw new Error("Could not detect face in registered image. Contact admin to re-register with a clearer photo.");
-        } else if (!liveDetections) {
-            throw new Error("Could not detect your face in current photo. Please:\n1. Ensure good lighting\n2. Face the camera directly\n3. Remove obstructions\n4. Try capturing again");
+        }
+        
+        if (!liveDetections) {
+            throw new Error("Could not detect your face in current photo. Please ensure good lighting and face the camera directly.");
         }
 
         displayMessage('loginError', 'Comparing faces... Please wait.', false);
 
-        // Step 4: Compare faces with more lenient threshold
-        const faceMatcher = new faceapi.FaceMatcher([registeredDetections], 0.6); // More lenient threshold
-        const bestMatch = faceMatcher.findBestMatch(liveDetections.descriptor);
-
-        const similarity = ((1 - bestMatch.distance) * 100).toFixed(1);
-        console.log(`Face match: distance=${bestMatch.distance}, similarity=${similarity}%`);
-
-        if (bestMatch.distance < 0.6) { // More lenient matching
-            displayMessage('loginError', `Face verified! (${similarity}% match) Logging in...`, false);
+        // Step 4: STRICTER face matching with multiple validation layers
+        const isValidMatch = await performStrictFaceValidation(registeredDetections, liveDetections, matNo);
+        
+        if (isValidMatch.success) {
+            displayMessage('loginError', `Face verified! (${isValidMatch.similarity}% match) Logging in...`, false);
             loginSuccess(studentData.token, studentData.user);
         } else {
-            throw new Error(`Face verification failed (${similarity}% match). Please ensure you're the registered user and try again with better lighting.`);
+            throw new Error(isValidMatch.error);
         }
 
     } catch (error) {
         console.error('Face login error:', error);
         throw error;
     }
+}
+
+// NEW: Stricter face detection function
+async function detectFaceWithHighConfidence(imageElement, imageName) {
+    // Use higher confidence thresholds to get better quality detections
+    const detectionOptions = [
+        new faceapi.SsdMobilenetv1Options({ minConfidence: 0.7 }), // High confidence first
+        new faceapi.SsdMobilenetv1Options({ minConfidence: 0.5 }), // Medium confidence
+        new faceapi.SsdMobilenetv1Options({ minConfidence: 0.3 })  // Lower confidence as fallback
+    ];
+
+    for (const options of detectionOptions) {
+        try {
+            console.log(`Trying high-confidence detection on ${imageName} with confidence ${options.minConfidence}...`);
+            
+            const detection = await faceapi
+                .detectSingleFace(imageElement, options)
+                .withFaceLandmarks()
+                .withFaceDescriptor();
+
+            if (detection && detection.detection.score >= 0.5) {
+                console.log(`High-quality detection found for ${imageName}:`, {
+                    score: detection.detection.score,
+                    box: detection.detection.box
+                });
+                return detection;
+            }
+        } catch (error) {
+            console.warn(`Detection failed for ${imageName} with confidence ${options.minConfidence}:`, error.message);
+        }
+    }
+
+    console.error(`All high-confidence detection methods failed for ${imageName} image`);
+    return null;
+}
+
+// NEW: Comprehensive face validation with multiple checks
+async function performStrictFaceValidation(registeredDetection, liveDetection, matNo) {
+    try {
+        // 1. STRICTER threshold - only accept very close matches
+        const STRICT_THRESHOLD = 0.45; // Much stricter than 0.6
+        const VERY_STRICT_THRESHOLD = 0.35; // For high-security matches
+
+        // 2. Calculate face descriptor distance
+        const distance = faceapi.euclideanDistance(registeredDetection.descriptor, liveDetection.descriptor);
+        const similarity = ((1 - distance) * 100).toFixed(1);
+        
+        console.log(`Face matching for ${matNo}:`, {
+            distance: distance,
+            similarity: similarity,
+            strictThreshold: STRICT_THRESHOLD,
+            veryStrictThreshold: VERY_STRICT_THRESHOLD
+        });
+
+        // 3. REJECT if faces are too different
+        if (distance > STRICT_THRESHOLD) {
+            return {
+                success: false,
+                similarity: similarity,
+                error: `Face verification failed (${similarity}% similarity). This appears to be a different person. Required: >=${((1-STRICT_THRESHOLD)*100).toFixed(1)}%`
+            };
+        }
+
+        // 4. Additional validation checks for very strict matching
+        if (distance > VERY_STRICT_THRESHOLD) {
+            // Require additional validation for medium matches
+            const additionalChecks = await performAdditionalFaceChecks(registeredDetection, liveDetection);
+            if (!additionalChecks.passed) {
+                return {
+                    success: false,
+                    similarity: similarity,
+                    error: `Face verification failed additional security checks (${similarity}% similarity). ${additionalChecks.reason}`
+                };
+            }
+        }
+
+        // 5. Success - faces match with high confidence
+        return {
+            success: true,
+            similarity: similarity,
+            distance: distance
+        };
+
+    } catch (error) {
+        console.error('Face validation error:', error);
+        return {
+            success: false,
+            error: 'Face validation system error. Please try again.'
+        };
+    }
+}
+
+// NEW: Additional face validation checks
+async function performAdditionalFaceChecks(registeredDetection, liveDetection) {
+    try {
+        // 1. Check face box dimensions similarity
+        const regBox = registeredDetection.detection.box;
+        const liveBox = liveDetection.detection.box;
+        
+        const aspectRatioDiff = Math.abs(
+            (regBox.width / regBox.height) - (liveBox.width / liveBox.height)
+        );
+        
+        if (aspectRatioDiff > 0.3) {
+            return {
+                passed: false,
+                reason: 'Face proportions too different'
+            };
+        }
+
+        // 2. Check detection confidence
+        if (registeredDetection.detection.score < 0.6 || liveDetection.detection.score < 0.6) {
+            return {
+                passed: false,
+                reason: 'Face detection confidence too low'
+            };
+        }
+
+        // 3. Validate landmarks are detected properly
+        if (!registeredDetection.landmarks || !liveDetection.landmarks) {
+            return {
+                passed: false,
+                reason: 'Facial landmarks not properly detected'
+            };
+        }
+
+        return { passed: true };
+        
+    } catch (error) {
+        console.error('Additional face checks error:', error);
+        return {
+            passed: false,
+            reason: 'Additional validation checks failed'
+        };
+    }
+}
+
+// UPDATED: Create face matcher with stricter settings
+function createStrictFaceMatcher(knownFaces, threshold = 0.45) {
+    return new faceapi.FaceMatcher(knownFaces, threshold);
 }
 // Helper function to create image from base64 with better error handling
 async function createImageFromBase64(base64Data) {
