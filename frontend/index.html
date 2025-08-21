@@ -183,288 +183,183 @@
 
 <!-- Face API Initialization Script -->
 <script>
-// Enhanced Face API Loading with multiple fallback strategies
 let faceApiLoaded = false;
-let loadingAttempts = 0;
-const maxLoadingAttempts = 3;
 
-// Check if face-api.js is available
-function checkFaceApiAvailability() {
-    return (typeof faceapi !== 'undefined' && 
-            faceapi.nets && 
-            faceapi.nets.ssdMobilenetv1 && 
-            faceapi.nets.faceLandmark68Net && 
-            faceapi.nets.faceRecognitionNet);
-}
+    // Check if face-api.js is properly loaded
+    function isFaceApiReady() {
+        return typeof faceapi !== 'undefined' && 
+               faceapi.nets && 
+               faceapi.nets.ssdMobilenetv1 && 
+               faceapi.nets.faceLandmark68Net && 
+               faceapi.nets.faceRecognitionNet;
+    }
 
-// Wait for face-api.js to load with enhanced checking
-function waitForFaceApi() {
-    return new Promise((resolve, reject) => {
-        let attempts = 0;
-        const maxAttempts = 100; // Wait up to 10 seconds
-        
-        function checkFaceApi() {
-            attempts++;
-            
-            if (checkFaceApiAvailability()) {
-                console.log('✅ face-api.js library loaded successfully');
-                resolve();
-            } else if (attempts < maxAttempts) {
-                setTimeout(checkFaceApi, 100);
-            } else {
-                reject(new Error('face-api.js failed to load after 10 seconds'));
-            }
-        }
-        
-        checkFaceApi();
-    });
-}
+    // Update status messages
+    function updateFaceStatus(message, isError = false) {
+        const statusElements = document.querySelectorAll('[id$="ScanStatus"]');
+        statusElements.forEach(el => {
+            el.textContent = message;
+            el.className = isError ? 'error-msg' : 'success-msg';
+        });
+        console.log(isError ? 'ERROR:' : 'INFO:', message);
+    }
 
-// Load face-api.js dynamically if it's not available
-async function loadFaceApiDynamically() {
-    return new Promise((resolve, reject) => {
-        if (checkFaceApiAvailability()) {
-            resolve();
-            return;
-        }
-
-        console.log('Loading face-api.js dynamically...');
-        
-        const script = document.createElement('script');
-        script.src = 'https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js';
-        script.async = true;
-        
-        script.onload = () => {
-            console.log('face-api.js script loaded via dynamic loading');
-            // Wait a bit for the library to initialize
-            setTimeout(() => {
-                if (checkFaceApiAvailability()) {
-                    resolve();
-                } else {
-                    reject(new Error('face-api.js loaded but not properly initialized'));
-                }
-            }, 1000);
-        };
-        
-        script.onerror = () => {
-            reject(new Error('Failed to load face-api.js script dynamically'));
-        };
-        
-        document.head.appendChild(script);
-    });
-}
-
-// Load models with multiple fallback URLs
-async function loadModelsWithFallback() {
-    const modelUrls = [
-        '/models', // Local server
-        'https://justadudewhohacks.github.io/face-api.js/models', // Official CDN
-        'https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js-models@master' // Alternative CDN
-    ];
-    
-    for (let i = 0; i < modelUrls.length; i++) {
+    // Load face-api.js models with comprehensive error handling
+    async function loadFaceApiModels() {
         try {
-            console.log(`Attempting to load models from: ${modelUrls[i]}`);
+            updateFaceStatus('Checking face-api.js library...');
             
-            await Promise.all([
-                faceapi.nets.ssdMobilenetv1.loadFromUri(modelUrls[i]),
-                faceapi.nets.faceLandmark68Net.loadFromUri(modelUrls[i]),
-                faceapi.nets.faceRecognitionNet.loadFromUri(modelUrls[i])
-            ]);
+            // Wait for face-api.js library to be available
+            let attempts = 0;
+            while (!isFaceApiReady() && attempts < 50) {
+                await new Promise(resolve => setTimeout(resolve, 100));
+                attempts++;
+            }
             
-            console.log(`✅ Models loaded successfully from: ${modelUrls[i]}`);
-            return true;
+            if (!isFaceApiReady()) {
+                throw new Error('face-api.js library not loaded properly');
+            }
+            
+            updateFaceStatus('Loading face recognition models...');
+            
+            // Try multiple CDN sources
+            const modelSources = [
+                'https://justadudewhohacks.github.io/face-api.js/models',
+                'https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js-models@master',
+                'https://raw.githubusercontent.com/justadudewhohacks/face-api.js-models/master'
+            ];
+            
+            let modelsLoaded = false;
+            let lastError = null;
+            
+            for (const modelUrl of modelSources) {
+                try {
+                    console.log(`Trying to load models from: ${modelUrl}`);
+                    
+                    await Promise.all([
+                        faceapi.nets.ssdMobilenetv1.loadFromUri(modelUrl),
+                        faceapi.nets.faceLandmark68Net.loadFromUri(modelUrl),
+                        faceapi.nets.faceRecognitionNet.loadFromUri(modelUrl)
+                    ]);
+                    
+                    console.log(`Models loaded successfully from: ${modelUrl}`);
+                    modelsLoaded = true;
+                    break;
+                    
+                } catch (error) {
+                    console.log(`Failed to load from ${modelUrl}:`, error.message);
+                    lastError = error;
+                }
+            }
+            
+            if (!modelsLoaded) {
+                throw new Error(`Failed to load models from all sources. Last error: ${lastError?.message}`);
+            }
+            
+            // Add helper function
+            if (!faceapi.bufferToImage) {
+                faceapi.bufferToImage = function(buffer) {
+                    return new Promise((resolve, reject) => {
+                        const img = new Image();
+                        img.onload = () => resolve(img);
+                        img.onerror = reject;
+                        img.src = URL.createObjectURL(buffer);
+                    });
+                };
+            }
+            
+            // Test the setup
+            updateFaceStatus('Testing face detection...');
+            await testFaceApi();
+            
+            faceApiLoaded = true;
+            updateFaceStatus('Face recognition ready! You can now capture your face.');
             
         } catch (error) {
-            console.log(`❌ Failed to load from ${modelUrls[i]}:`, error.message);
-            if (i === modelUrls.length - 1) {
-                throw new Error('Failed to load models from all sources');
-            }
+            console.error('Face-API loading failed:', error);
+            faceApiLoaded = false;
+            updateFaceStatus(`Face recognition failed: ${error.message}`, true);
+            
+            // Provide fallback instructions
+            setTimeout(() => {
+                updateFaceStatus('Try refreshing the page or check your internet connection', true);
+            }, 2000);
         }
     }
-}
 
-// Main face API loading function with comprehensive error handling
-// Replace the entire face-api.js script section in your HTML with this
+    // Test face-api functionality
+    async function testFaceApi() {
+        try {
+            // Create a test canvas
+            const canvas = document.createElement('canvas');
+            canvas.width = 100;
+            canvas.height = 100;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#f0f0f0';
+            ctx.fillRect(0, 0, 100, 100);
+            
+            // Try to run detection (should not error even with no faces)
+            await faceapi.detectAllFaces(canvas);
+            console.log('Face-API test passed');
+            
+        } catch (error) {
+            throw new Error(`Face-API test failed: ${error.message}`);
+        }
+    }
 
+    // Initialize when everything is ready
+    async function initializeFaceApi() {
+        try {
+            // Wait for DOM
+            if (document.readyState === 'loading') {
+                await new Promise(resolve => {
+                    document.addEventListener('DOMContentLoaded', resolve);
+                });
+            }
+            
+            // Wait for face-api.js script
+            updateFaceStatus('Loading face-api.js library...');
+            
+            let scriptLoadAttempts = 0;
+            while (typeof faceapi === 'undefined' && scriptLoadAttempts < 100) {
+                await new Promise(resolve => setTimeout(resolve, 100));
+                scriptLoadAttempts++;
+            }
+            
+            if (typeof faceapi === 'undefined') {
+                throw new Error('face-api.js script failed to load');
+            }
+            
+            // Load models
+            await loadFaceApiModels();
+            
+        } catch (error) {
+            console.error('Face-API initialization failed:', error);
+            updateFaceStatus('Face recognition unavailable. Please refresh the page.', true);
+        }
+    }
 
-// Simplified CDN-only loading
-async function loadFaceApiModels() {
-    try {
-        console.log('Loading face-api.js models from CDN...');
-        
-        // Show loading message
-        document.querySelectorAll('[id$="ScanStatus"]').forEach(el => {
-            el.textContent = 'Loading face recognition...';
-            el.className = 'success-msg';
-        });
-        
-        // Load models from CDN only
-        const modelUrl = 'https://justadudewhohacks.github.io/face-api.js/models';
-        
-        await Promise.all([
-            faceapi.nets.ssdMobilenetv1.loadFromUri(modelUrl),
-            faceapi.nets.faceLandmark68Net.loadFromUri(modelUrl),
-            faceapi.nets.faceRecognitionNet.loadFromUri(modelUrl)
-        ]);
-        
-        // Initialize helper function
-        faceapi.bufferToImage = function(buffer) {
-            return new Promise((resolve, reject) => {
-                const img = new Image();
-                img.onload = () => resolve(img);
-                img.onerror = reject;
-                img.src = URL.createObjectURL(buffer);
-            });
-        };
-        
-        faceApiLoaded = true;
-        console.log('Face-api.js loaded successfully');
-        
-        // Update status
-        document.querySelectorAll('[id$="ScanStatus"]').forEach(el => {
-            el.textContent = 'Face recognition ready!';
-            el.className = 'success-msg';
-        });
-        
-    } catch (error) {
-        console.error('Failed to load face-api.js:', error);
+    // Manual retry function
+    window.retryFaceApi = function() {
+        console.log('Retrying face-api.js initialization...');
         faceApiLoaded = false;
+        initializeFaceApi();
+    };
+
+    // Debug function
+    window.debugFaceApi = function() {
+        console.log('=== Face-API Debug Info ===');
+        console.log('faceapi available:', typeof faceapi !== 'undefined');
+        console.log('Models loaded:', faceApiLoaded);
+        console.log('Document ready:', document.readyState);
         
-        document.querySelectorAll('[id$="ScanStatus"]').forEach(el => {
-            el.textContent = 'Face recognition failed to load';
-            el.className = 'error-msg';
-        });
-    }
-}
+        if (typeof faceapi !== 'undefined') {
+            console.log('Available networks:', Object.keys(faceapi.nets || {}));
+        }
+    };
 
-// Wait for DOM and faceapi to be ready
-document.addEventListener('DOMContentLoaded', async () => {
-    // Wait for faceapi to be available
-    while (typeof faceapi === 'undefined') {
-        await new Promise(resolve => setTimeout(resolve, 100));
-    }
-    
-    loadFaceApiModels();
-});
-
-// Test face-api.js setup
-async function testFaceApiSetup() {
-    try {
-        console.log('Testing face-api.js setup...');
-        
-        // Create a small test image
-        const canvas = document.createElement('canvas');
-        canvas.width = 100;
-        canvas.height = 100;
-        const ctx = canvas.getContext('2d');
-        
-        // Draw a simple test pattern
-        ctx.fillStyle = '#f0f0f0';
-        ctx.fillRect(0, 0, 100, 100);
-        ctx.fillStyle = '#333';
-        ctx.fillRect(40, 40, 20, 20);
-        
-        // Try to detect faces (should find none, but shouldn't error)
-        const detections = await faceapi.detectAllFaces(canvas);
-        console.log(`✅ Face-api.js test completed. Detected ${detections.length} faces in test image.`);
-        
-    } catch (testError) {
-        console.warn('⚠️ Face-api.js test failed:', testError.message);
-        // Don't mark as failed since models might still work for real images
-    }
-}
-
-// Helper function to update face API status messages
-function updateFaceApiStatus(message, className) {
-    document.querySelectorAll('[id$="ScanStatus"]').forEach(el => {
-        el.textContent = message;
-        el.className = className;
-    });
-}
-
-// Show face API error
-function showFaceApiError(message) {
-    updateFaceApiStatus(message, 'error-msg');
-    
-    // Also show in console for debugging
-    console.error('Face API Error:', message);
-}
-
-// Initialize helper functions
-function initializeHelperFunctions() {
-    if (typeof faceapi !== 'undefined') {
-        // Helper to convert blob to image
-        faceapi.bufferToImage = function(buffer) {
-            return new Promise((resolve, reject) => {
-                const img = new Image();
-                img.onload = () => {
-                    console.log('Image loaded for face recognition');
-                    resolve(img);
-                };
-                img.onerror = (error) => {
-                    console.error('Failed to load image:', error);
-                    reject(error);
-                };
-                img.src = URL.createObjectURL(buffer);
-            });
-        };
-        
-        console.log('Helper functions initialized');
-    }
-}
-
-// Manual retry function for troubleshooting
-window.retryFaceApiLoad = function() {
-    console.log('🔄 Manually retrying face-api models loading...');
-    loadingAttempts = 0;
-    faceApiLoaded = false;
-    loadFaceApiModels();
-};
-
-// Check for face-api.js availability and show helpful debug info
-window.debugFaceApi = function() {
-    console.log('=== Face-API.js Debug Info ===');
-    console.log('faceapi available:', typeof faceapi !== 'undefined');
-    console.log('faceapi.nets available:', typeof faceapi !== 'undefined' && !!faceapi.nets);
-    console.log('Models loaded:', faceApiLoaded);
-    console.log('Loading attempts:', loadingAttempts);
-    
-    if (typeof faceapi !== 'undefined' && faceapi.nets) {
-        console.log('Available nets:');
-        Object.keys(faceapi.nets).forEach(net => {
-            console.log(`  ${net}:`, !!faceapi.nets[net]);
-        });
-    }
-    
-    // Test network connectivity
-    fetch('/models/ssd_mobilenetv1_model-weights_manifest.json')
-        .then(response => console.log('Local models accessible:', response.ok))
-        .catch(error => console.log('Local models not accessible:', error.message));
-    
-    console.log('==============================');
-};
-
-// Initialize when DOM is ready
-document.addEventListener('DOMContentLoaded', () => {
-    console.log('🚀 Starting face-api.js initialization...');
-    
-    // Show initial loading message
-    updateFaceApiStatus('Initializing face recognition...', 'success-msg');
-    
-    // Start loading after a brief delay to ensure DOM is ready
-    setTimeout(() => {
-        loadFaceApiModels();
-    }, 100);
-});
-
-// Handle page visibility changes (retry when page becomes visible)
-document.addEventListener('visibilitychange', () => {
-    if (!document.hidden && !faceApiLoaded && loadingAttempts < maxLoadingAttempts) {
-        console.log('Page became visible, retrying face-api.js loading...');
-        setTimeout(loadFaceApiModels, 1000);
-    }
-});
+    // Start initialization
+    initializeFaceApi();
 </script>
 
 
