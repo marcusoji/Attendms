@@ -2,9 +2,9 @@
    "name": "attendance-app",
      "version": "1.0.0",
        "description": "Student attendance management system with face recognition and geolocation",
-         "main": "backend/server.js",
+         "main": "server.js",
            "scripts": {
-                "start": "node backend/server.js"
+                "start": "node server.js"
            },
   "dependencies": {
     "bcrypt": "^6.0.0",
