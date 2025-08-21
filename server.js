@@ -391,7 +391,9 @@ const handleStudentRegistration = asyncHandler(async (req, res) => {
 });
 
 
-// --- LOGIN ROUTE ---
+// ADD THIS ROUTE TO YOUR SERVER.JS - IT'S COMPLETELY MISSING
+// Place this BEFORE your main /api/login route (around line 450)
+
 app.post('/api/login', asyncHandler(async (req, res) => {
     const { userType, matNo, email, password } = req.body;
     log('info', 'Login attempt', { userType, matNo, email: email ? '[PROVIDED]' : '[NOT PROVIDED]' });
@@ -418,20 +420,41 @@ app.post('/api/login', asyncHandler(async (req, res) => {
         }
         
         const student = students[0];
+        
+        // NEW: Return face scan data for face recognition
+        let faceScanData = null;
+        if (student.face_scan_path && fs.existsSync(student.face_scan_path)) {
+            try {
+                const imageBuffer = fs.readFileSync(student.face_scan_path);
+                faceScanData = imageBuffer.toString('base64');
+                log('info', 'Face scan data prepared for verification', { matNo, fileSize: imageBuffer.length });
+            } catch (fileError) {
+                log('error', 'Failed to read face scan file', { path: student.face_scan_path, error: fileError.message });
+                return res.status(500).json({ message: 'Failed to load face scan data' });
+            }
+        }
+        
+        if (!faceScanData) {
+            log('warn', 'No face scan data available', { matNo });
+            return res.status(404).json({ message: 'No face scan data found for this student' });
+        }
+        
         const token = jwt.sign(
             { id: student.id, type: 'student', matNo: student.mat_no }, 
             JWT_SECRET, 
             { expiresIn: '24h' }
         );
         
-        // Remove sensitive data
-        delete student.face_scan_path;
-        
-        log('info', 'Student login successful', { matNo, studentId: student.id });
+        log('info', 'Student login data prepared', { matNo, studentId: student.id });
         res.json({ 
-            message: 'Login successful', 
+            message: 'Student found, face verification required', 
             token, 
-            user: student 
+            user: {
+                id: student.id,
+                name: student.name,
+                mat_no: student.mat_no
+            },
+            faceScanData: faceScanData  // This is what was missing!
         });
 
     } else { // lecturer or admin
@@ -481,25 +504,9 @@ app.post('/api/login', asyncHandler(async (req, res) => {
         });
     }
 }));
-// *** NEW ROUTE FOR STUDENT FACE LOGIN ***
-app.post('/api/login/student', asyncHandler(async (req, res) => {
-    const { matNo } = req.body;
-    if (!matNo) {
-        return res.status(400).json({ message: 'Matriculation number is required' });
-    }
-    const [students] = await db.query('SELECT * FROM students WHERE mat_no = ?', [matNo.trim()]);
-    if (students.length === 0) {
-        return res.status(404).json({ message: 'Student not found.' });
-    }
-    const student = students[0];
-    const token = jwt.sign({ id: student.id, type: 'student', matNo: student.mat_no }, JWT_SECRET, { expiresIn: '5m' });
-    
-    res.json({
-        faceScanPath: student.face_scan_path,
-        token: token,
-        user: { id: student.id, name: student.name, mat_no: student.mat_no }
-    });
-}));
+
+// REMOVE the duplicate student login route you have (the /api/login/student one)
+// It's causing conflicts
 // --- PROTECTED ROUTES ---
 
 // Create course route
