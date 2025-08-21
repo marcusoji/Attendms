@@ -129,22 +129,40 @@
             document.getElementById('video-preview-register').style.display = 'none';
         }
         
-        function captureFace(videoElementId, statusElementId) {
-            const videoPreview = document.getElementById(videoElementId);
-            if (!videoStream) {
-                displayMessage(statusElementId, "Camera not started. Please start the camera first.", true);
-                return;
-            }
-            const context = captureCanvas.getContext('2d');
-            captureCanvas.width = videoPreview.videoWidth;
-            captureCanvas.height = videoPreview.videoHeight;
-            context.drawImage(videoPreview, 0, 0, captureCanvas.width, captureCanvas.height);
-            captureCanvas.toBlob(blob => {
-                faceScanBlob = blob;
-                displayMessage(statusElementId, "✅ Face Captured Successfully!", false);
-                stopCamera();
-            }, 'image/jpeg');
+       function captureFace(videoElementId, statusElementId) {
+    const videoPreview = document.getElementById(videoElementId);
+    if (!videoStream) {
+        displayMessage(statusElementId, "Camera not started. Please start the camera first.", true);
+        return;
+    }
+
+    // Ensure video is ready
+    if (videoPreview.videoWidth === 0 || videoPreview.videoHeight === 0) {
+        displayMessage(statusElementId, "Camera is loading. Please wait a moment and try again.", true);
+        return;
+    }
+
+    const context = captureCanvas.getContext('2d');
+    
+    // Set canvas size to match video
+    captureCanvas.width = videoPreview.videoWidth;
+    captureCanvas.height = videoPreview.videoHeight;
+    
+    // Draw the video frame to canvas
+    context.drawImage(videoPreview, 0, 0, captureCanvas.width, captureCanvas.height);
+    
+    // Convert to blob with higher quality
+    captureCanvas.toBlob(blob => {
+        if (blob) {
+            faceScanBlob = blob;
+            displayMessage(statusElementId, "Face captured successfully! Make sure your face was clearly visible.", false);
+            stopCamera();
+        } else {
+            displayMessage(statusElementId, "Failed to capture image. Please try again.", true);
         }
+    }, 'image/jpeg', 0.9); // Higher quality JPEG
+}
+
 
         // API Functions
         async function apiFetch(endpoint, options = {}) {
@@ -692,43 +710,74 @@ async function handleStudentFaceLogin() {
 
     displayMessage('loginError', 'Verifying face... Please wait.', false);
 
-    // Step 1: Get the registered face scan data from the server
-    const studentData = await apiFetch('/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userType: 'student', matNo })
-    });
+    try {
+        // Step 1: Get the registered face scan data from the server
+        const studentData = await apiFetch('/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userType: 'student', matNo })
+        });
 
-    if (!studentData.faceScanData) {
-        throw new Error("No registered face scan found for this student.");
-    }
+        if (!studentData.faceScanData) {
+            throw new Error("No registered face scan found for this student.");
+        }
 
-    // Step 2: Create an image element from the registered Base64 data
-    const registeredImage = new Image();
-    registeredImage.src = `data:image/jpeg;base64,${studentData.faceScanData}`;
-    await new Promise(resolve => registeredImage.onload = resolve);
-    
-    // Step 3: Create an image element from the live captured blob
-    const liveImage = await faceapi.bufferToImage(faceScanBlob);
+        // Step 2: Create an image element from the registered Base64 data
+        const registeredImage = new Image();
+        registeredImage.crossOrigin = 'anonymous';
+        registeredImage.src = `data:image/jpeg;base64,${studentData.faceScanData}`;
+        await new Promise((resolve, reject) => {
+            registeredImage.onload = resolve;
+            registeredImage.onerror = () => reject(new Error('Failed to load registered image'));
+        });
+        
+        // Step 3: Create an image element from the live captured blob
+        const liveImage = await faceapi.bufferToImage(faceScanBlob);
 
-    // Step 4: Get face descriptors for both images
-    const registeredDetections = await faceapi.detectSingleFace(registeredImage).withFaceLandmarks().withFaceDescriptor();
-    const liveDetections = await faceapi.detectSingleFace(liveImage).withFaceLandmarks().withFaceDescriptor();
+        displayMessage('loginError', 'Analyzing faces... Please wait.', false);
 
-    if (!registeredDetections || !liveDetections) {
-        throw new Error("Could not detect a face in one of the images. Please ensure your face is clear and try again.");
-    }
+        // Step 4: Get face descriptors with more detailed error handling
+        console.log('Detecting face in registered image...');
+        const registeredDetections = await faceapi
+            .detectSingleFace(registeredImage, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.3 }))
+            .withFaceLandmarks()
+            .withFaceDescriptor();
 
-    // Step 5: Compare the two face descriptors
-    const faceMatcher = new faceapi.FaceMatcher(registeredDetections);
-    const bestMatch = faceMatcher.findBestMatch(liveDetections.descriptor);
+        console.log('Detecting face in live image...');
+        const liveDetections = await faceapi
+            .detectSingleFace(liveImage, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.3 }))
+            .withFaceLandmarks()
+            .withFaceDescriptor();
 
-    // Using a threshold of 0.5 for higher accuracy
-    if (bestMatch.label === 'person 1' && bestMatch.distance < 0.5) { 
-        displayMessage('loginSuccess', 'Face match successful! Logging in...', false);
-        loginSuccess(studentData.token, studentData.user);
-    } else {
-        throw new Error(`Face does not match. (Similarity score: ${((1 - bestMatch.distance) * 100).toFixed(2)}%)`);
+        // Provide specific feedback about which image failed
+        if (!registeredDetections && !liveDetections) {
+            throw new Error("Could not detect faces in both the registered image and your current photo. Please ensure your face is clearly visible and well-lit, then try capturing again.");
+        } else if (!registeredDetections) {
+            throw new Error("Could not detect a face in your registered image. Please contact admin to re-register with a clearer photo.");
+        } else if (!liveDetections) {
+            throw new Error("Could not detect your face in the current photo. Please ensure your face is clearly visible, well-lit, and centered, then capture again.");
+        }
+
+        displayMessage('loginError', 'Comparing faces... Please wait.', false);
+
+        // Step 5: Compare the two face descriptors
+        const faceMatcher = new faceapi.FaceMatcher([registeredDetections], 0.5);
+        const bestMatch = faceMatcher.findBestMatch(liveDetections.descriptor);
+
+        // More detailed matching feedback
+        const similarity = ((1 - bestMatch.distance) * 100).toFixed(1);
+        console.log(`Face match result: ${bestMatch.label}, distance: ${bestMatch.distance}, similarity: ${similarity}%`);
+
+        if (bestMatch.label === 'person 1' && bestMatch.distance < 0.5) { 
+            displayMessage('loginError', `Face match successful! (${similarity}% similarity) Logging in...`, false);
+            loginSuccess(studentData.token, studentData.user);
+        } else {
+            throw new Error(`Face verification failed. Similarity: ${similarity}%. Please ensure you're the registered user and try again with better lighting.`);
+        }
+
+    } catch (error) {
+        console.error('Face login error:', error);
+        throw error;
     }
 }
 
