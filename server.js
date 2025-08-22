@@ -26,12 +26,7 @@ const log = (level, message, data = null) => {
     }
 };
 
-// Ensure uploads directory exists
-const uploadsDir = './uploads';
-if (!fs.existsSync(uploadsDir)) {
-    fs.mkdirSynsc(uploadsDir, { recursive: true });
-    log('info', 'Created uploads directory');
-}
+
 
 // --- MIDDLEWARE ---
 app.use(cors());
