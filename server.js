@@ -204,7 +204,7 @@ app.get('/api/debug/env', (req, res) => {
         dbUser: process.env.DB_USER ? 'Set' : 'Not set',
         dbName: process.env.DB_NAME ? 'Set' : 'Not set',
         jwtSecret: process.env.JWT_SECRET ? 'Set' : 'Not set',
-        uploadsExists: fs.existsSync(uploadsDir)
+        
     });
 });
 
@@ -1164,7 +1164,6 @@ app.use((req, res) => {
 const server = app.listen(PORT, () => {
     log('info', `Server started successfully`, {
         port: PORT,
-        uploadsDir: path.resolve(uploadsDir),
         nodeEnv: process.env.NODE_ENV || 'development'
     });
 });
