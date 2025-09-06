@@ -10,13 +10,17 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const dotenv = require('dotenv');
+const { createClient } = require('@supabase/supabase-js');
 dotenv.config();
 
 // --- INITIALIZATION ---
 const app = express();
 const PORT = process.env.PORT || 5000;
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret';
-
+// STEP 3: Add Supabase configuration (add these to your .env file)
+const supabaseUrl = process.env.SUPABASE_URL; // Your Supabase project URL
+const supabaseKey = process.env.SUPABASE_ANON_KEY; // Your Supabase anon/public key
+const supabase = createClient(supabaseUrl, supabaseKey);
 // Enhanced logging function
 const log = (level, message, data = null) => {
     const timestamp = new Date().toISOString();
@@ -346,9 +350,9 @@ const handleRegistration = asyncHandler(async (req, res) => {
     }
 });
 
-// Student registration handler
+// STEP 4: Replace the handleStudentRegistration function in server.js
 const handleStudentRegistration = asyncHandler(async (req, res) => {
-    log('info', 'Processing student registration');
+    log('info', 'Processing student registration with Supabase storage');
     
     const { name, matNo, email, phone } = req.body;
     const faceFile = req.file;
@@ -368,6 +372,7 @@ const handleStudentRegistration = asyncHandler(async (req, res) => {
     }
 
     try {
+        // Check if student already exists
         const [existing] = await db.query(
             'SELECT id FROM students WHERE mat_no = ? OR email = ?', 
             [matNo.trim(), email.trim()]
@@ -377,12 +382,27 @@ const handleStudentRegistration = asyncHandler(async (req, res) => {
             return res.status(409).json({ message: 'Student already exists' });
         }
 
+        // CHANGED: Upload to Supabase instead of local storage
+        const fileName = `faces/${matNo.trim()}-${Date.now()}.jpg`;
+        const { data: uploadData, error: uploadError } = await supabase.storage
+            .from('face-scans') // This bucket name - you'll need to create it
+            .upload(fileName, faceFile.buffer, {
+                contentType: faceFile.mimetype,
+                upsert: false
+            });
+
+        if (uploadError) {
+            log('error', 'Supabase upload failed', uploadError);
+            return res.status(500).json({ message: 'Failed to upload face scan' });
+        }
+
+        // Store the Supabase file path instead of local path
         await db.query(
             'INSERT INTO students (mat_no, name, email, phone, face_scan_path) VALUES (?, ?, ?, ?, ?)',
-            [matNo.trim(), name.trim(), email.trim(), phone.trim(), faceFile.path]
+            [matNo.trim(), name.trim(), email.trim(), phone.trim(), fileName]
         );
 
-        log('info', 'Student registered successfully');
+        log('info', 'Student registered successfully with Supabase storage');
         return res.status(201).json({ message: 'Student registered successfully' });
 
     } catch (error) {
@@ -404,60 +424,70 @@ app.post('/api/login', asyncHandler(async (req, res) => {
         return res.status(400).json({ message: 'Invalid user type' });
     }
 
-    if (userType === 'student') {
-        if (!matNo) {
-            log('warn', 'Student login failed: No matriculation number');
-            return res.status(400).json({ message: 'Matriculation number is required' });
-        }
+   if (userType === 'student') {
+    if (!matNo) {
+        log('warn', 'Student login failed: No matriculation number');
+        return res.status(400).json({ message: 'Matriculation number is required' });
+    }
 
-        const [students] = await db.query(
-            'SELECT * FROM students WHERE mat_no = ?', 
-            [matNo.trim()]
-        );
-        
-        if (students.length === 0) {
-            log('warn', 'Student login failed: Not found', { matNo });
-            return res.status(404).json({ message: 'Student not found' });
-        }
-        
-        const student = students[0];
-        
-        // NEW: Return face scan data for face recognition
-        let faceScanData = null;
-        if (student.face_scan_path && fs.existsSync(student.face_scan_path)) {
-            try {
-                const imageBuffer = fs.readFileSync(student.face_scan_path);
-                faceScanData = imageBuffer.toString('base64');
-                log('info', 'Face scan data prepared for verification', { matNo, fileSize: imageBuffer.length });
-            } catch (fileError) {
-                log('error', 'Failed to read face scan file', { path: student.face_scan_path, error: fileError.message });
+    const [students] = await db.query(
+        'SELECT * FROM students WHERE mat_no = ?', 
+        [matNo.trim()]
+    );
+    
+    if (students.length === 0) {
+        log('warn', 'Student login failed: Not found', { matNo });
+        return res.status(404).json({ message: 'Student not found' });
+    }
+    
+    const student = students[0];
+    
+    // CHANGED: Download from Supabase instead of reading local file
+    let faceScanData = null;
+    if (student.face_scan_path) {
+        try {
+            const { data: fileData, error: downloadError } = await supabase.storage
+                .from('face-scans')
+                .download(student.face_scan_path);
+
+            if (downloadError) {
+                log('error', 'Failed to download face scan from Supabase', downloadError);
                 return res.status(500).json({ message: 'Failed to load face scan data' });
             }
-        }
-        
-        if (!faceScanData) {
-            log('warn', 'No face scan data available', { matNo });
-            return res.status(404).json({ message: 'No face scan data found for this student' });
-        }
-        
-        const token = jwt.sign(
-            { id: student.id, type: 'student', matNo: student.mat_no }, 
-            JWT_SECRET, 
-            { expiresIn: '24h' }
-        );
-        
-        log('info', 'Student login data prepared', { matNo, studentId: student.id });
-        res.json({ 
-            message: 'Student found, face verification required', 
-            token, 
-            user: {
-                id: student.id,
-                name: student.name,
-                mat_no: student.mat_no
-            },
-            faceScanData: faceScanData  // This is what was missing!
-        });
 
+            // Convert blob to base64
+            const buffer = await fileData.arrayBuffer();
+            faceScanData = Buffer.from(buffer).toString('base64');
+            
+            log('info', 'Face scan data downloaded from Supabase', { matNo, fileSize: buffer.byteLength });
+        } catch (fileError) {
+            log('error', 'Failed to process face scan file', fileError);
+            return res.status(500).json({ message: 'Failed to load face scan data' });
+        }
+    }
+    
+    if (!faceScanData) {
+        log('warn', 'No face scan data available', { matNo });
+        return res.status(404).json({ message: 'No face scan data found for this student' });
+    }
+    
+    const token = jwt.sign(
+        { id: student.id, type: 'student', matNo: student.mat_no }, 
+        JWT_SECRET, 
+        { expiresIn: '24h' }
+    );
+    
+    log('info', 'Student login data prepared', { matNo, studentId: student.id });
+    res.json({ 
+        message: 'Student found, face verification required', 
+        token, 
+        user: {
+            id: student.id,
+            name: student.name,
+            mat_no: student.mat_no
+        },
+        faceScanData: faceScanData
+    });
     } else { // lecturer or admin
         const validationError = validateInput(req.body, ['email', 'password']);
         if (validationError) {
