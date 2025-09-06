@@ -99,21 +99,11 @@ const testDbConnection = async () => {
 testDbConnection();
 
 // --- FILE UPLOAD SETUP ---
-const storage = multer.memoryStorage()({
-    destination: (req, file, cb) => {
-        cb(null, uploadsDir);
-    },
-    filename: (req, file, cb) => {
-        const matNo = req.body.matNo || 'unknown';
-        const timestamp = Date.now();
-        const ext = path.extname(file.originalname);
-        cb(null, `${matNo}-${timestamp}${ext}`);
-    }
-});
+const storage = multer.memoryStorage(); // This ensures faceFile.buffer exists
 
 const upload = multer({ 
     storage,
-    limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+    limits: { fileSize: 5 * 1024 * 1024 },
     fileFilter: (req, file, cb) => {
         const allowedTypes = /jpeg|jpg|png|gif/;
         const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
@@ -126,7 +116,6 @@ const upload = multer({
         }
     }
 });
-
 // Multer for form data only (lecturers) - NO FILE EXPECTED
 const uploadFormOnly = multer({
     limits: { fileSize: 1024 * 1024 } // 1MB limit for form data
