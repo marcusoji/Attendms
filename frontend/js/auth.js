@@ -106,7 +106,7 @@
             });
         }
 
-       // 3. UPDATED: Start camera with better video constraints
+      // 3. UPDATED: Start camera with better video constraints
 async function startCamera(videoElementId) {
     stopCamera();
     const videoPreview = document.getElementById(videoElementId);
@@ -151,36 +151,47 @@ async function startCamera(videoElementId) {
 }
 
 
+
 // 4. NEW: Show lighting quality indicator
 function showLightingTips(videoElementId) {
     const videoPreview = document.getElementById(videoElementId);
     const statusElementId = videoElementId.includes('login') ? 'loginScanStatus' : 'registerScanStatus';
     
-    // Create lighting indicator if it doesn't exist
-    let lightingIndicator = document.getElementById('lightingIndicator');
-    if (!lightingIndicator) {
-        lightingIndicator = document.createElement('div');
-        lightingIndicator.id = 'lightingIndicator';
-        lightingIndicator.style.cssText = `
-            position: absolute;
-            top: 10px;
-            left: 10px;
-            padding: 10px 15px;
-            background: rgba(0, 0, 0, 0.7);
-            color: white;
-            border-radius: 5px;
-            font-size: 12px;
-            z-index: 1000;
-        `;
-        videoPreview.parentElement.style.position = 'relative';
-        videoPreview.parentElement.appendChild(lightingIndicator);
+    // Remove existing indicator if any
+    const existingIndicator = document.getElementById('lightingIndicator');
+    if (existingIndicator) {
+        existingIndicator.remove();
     }
     
-    // Monitor lighting quality
-    const checkLighting = setInterval(() => {
+    // Create lighting indicator
+    const lightingIndicator = document.createElement('div');
+    lightingIndicator.id = 'lightingIndicator';
+    lightingIndicator.style.cssText = `
+        position: absolute;
+        top: 10px;
+        left: 10px;
+        padding: 10px 15px;
+        background: rgba(0, 0, 0, 0.7);
+        color: white;
+        border-radius: 5px;
+        font-size: 12px;
+        z-index: 1000;
+        font-weight: bold;
+    `;
+    
+    const videoContainer = videoPreview.parentElement;
+    if (!videoContainer.style.position || videoContainer.style.position === 'static') {
+        videoContainer.style.position = 'relative';
+    }
+    videoContainer.appendChild(lightingIndicator);
+    
+    // Monitor lighting quality AND face detection
+    const checkLighting = setInterval(async () => {
         if (!videoStream) {
             clearInterval(checkLighting);
-            if (lightingIndicator) lightingIndicator.remove();
+            if (lightingIndicator && lightingIndicator.parentElement) {
+                lightingIndicator.remove();
+            }
             return;
         }
         
@@ -203,9 +214,26 @@ function showLightingTips(videoElementId) {
         }
         const avgBrightness = totalBrightness / (data.length / 4);
         
-        // Update indicator
+        // Try to detect face in live video
+        let faceDetected = false;
+        if (faceApiLoaded) {
+            try {
+                const detection = await faceapi.detectSingleFace(
+                    videoPreview,
+                    new faceapi.SsdMobilenetv1Options({ minConfidence: 0.3 })
+                );
+                faceDetected = !!detection;
+            } catch (err) {
+                // Ignore detection errors during monitoring
+            }
+        }
+        
+        // Update indicator based on lighting AND face detection
         let message, color;
-        if (avgBrightness < 60) {
+        if (!faceDetected) {
+            message = "⚠️ No Face - Position face in center";
+            color = "#ef4444";
+        } else if (avgBrightness < 60) {
             message = "🔴 Too Dark - Add more light";
             color = "#ef4444";
         } else if (avgBrightness < 100) {
@@ -219,10 +247,30 @@ function showLightingTips(videoElementId) {
             color = "#10b981";
         }
         
-        lightingIndicator.textContent = message;
-        lightingIndicator.style.background = color;
+        if (lightingIndicator && lightingIndicator.parentElement) {
+            lightingIndicator.textContent = message;
+            lightingIndicator.style.background = color;
+        }
         
-    }, 500); // Check every 500ms
+    }, 1000); // Check every second
+}
+
+// Helper function to stop camera (add this if not in your auth.js)
+function stopCamera() {
+    if (videoStream) {
+        videoStream.getTracks().forEach(track => track.stop());
+        videoStream = null;
+    }
+    
+    // Hide video elements
+    document.getElementById('video-preview-login').style.display = 'none';
+    document.getElementById('video-preview-register').style.display = 'none';
+    
+    // Remove lighting indicator
+    const lightingIndicator = document.getElementById('lightingIndicator');
+    if (lightingIndicator && lightingIndicator.parentElement) {
+        lightingIndicator.remove();
+    }
 }
 
 // 5. NEW: Add lighting tips to UI
@@ -239,18 +287,12 @@ function displayLightingGuidance(statusElementId) {
     displayMessage(statusElementId, tips, false);
 }
 
-        function stopCamera() {
-            if (videoStream) {
-                videoStream.getTracks().forEach(track => track.stop());
-                videoStream = null;
-            }
-            document.getElementById('video-preview-login').style.display = 'none';
-            document.getElementById('video-preview-register').style.display = 'none';
-        }
         
-      // 1. IMPROVED captureFace with lighting enhancement
-function captureFace(videoElementId, statusElementId) {
+        
+     // 1. IMPROVED captureFace with better face detection
+async function captureFace(videoElementId, statusElementId) {
     const videoPreview = document.getElementById(videoElementId);
+    
     if (!videoStream) {
         displayMessage(statusElementId, "Camera not started. Please start the camera first.", true);
         return;
@@ -262,10 +304,18 @@ function captureFace(videoElementId, statusElementId) {
         return;
     }
 
+    // Check if face-api is loaded
+    if (!faceApiLoaded) {
+        displayMessage(statusElementId, "Face recognition is still loading. Please wait...", true);
+        return;
+    }
+
+    displayMessage(statusElementId, "📸 Capturing image...", false);
+
     const context = captureCanvas.getContext('2d');
     
     // Set canvas size to match video
-    const width = Math.max(videoPreview.videoWidth, 640);  // Increased minimum size
+    const width = Math.max(videoPreview.videoWidth, 640);
     const height = Math.max(videoPreview.videoHeight, 480);
     
     captureCanvas.width = width;
@@ -284,57 +334,87 @@ function captureFace(videoElementId, statusElementId) {
     
     // Convert to blob with high quality
     captureCanvas.toBlob(async (blob) => {
-        if (blob && blob.size > 1000) {
-            faceScanBlob = blob;
+        if (!blob || blob.size < 1000) {
+            displayMessage(statusElementId, "❌ Failed to capture image. Please try again.", true);
+            return;
+        }
+
+        displayMessage(statusElementId, "🔍 Detecting face...", false);
+        
+        try {
+            // Create image from blob for face detection
+            const imageUrl = URL.createObjectURL(blob);
+            const img = new Image();
             
-            // Test face detection quality
-            try {
-                displayMessage(statusElementId, "Analyzing image quality...", false);
-                const testImage = await faceapi.bufferToImage(blob);
-                const testDetection = await faceapi.detectSingleFace(
-                    testImage, 
-                    new faceapi.SsdMobilenetv1Options({ minConfidence: 0.5 })
+            await new Promise((resolve, reject) => {
+                img.onload = resolve;
+                img.onerror = reject;
+                img.src = imageUrl;
+            });
+            
+            console.log('Image loaded for detection:', img.width, 'x', img.height);
+            
+            // Try multiple detection methods with increasingly lenient thresholds
+            let testDetection = null;
+            const confidenceLevels = [0.3, 0.2, 0.15, 0.1];
+            
+            for (const minConfidence of confidenceLevels) {
+                console.log(`Trying detection with confidence ${minConfidence}...`);
+                
+                testDetection = await faceapi.detectSingleFace(
+                    img, 
+                    new faceapi.SsdMobilenetv1Options({ minConfidence })
                 );
                 
                 if (testDetection) {
-                    const quality = testDetection.score;
-                    if (quality > 0.7) {
-                        displayMessage(statusElementId, 
-                            `✅ Excellent capture! (${(quality * 100).toFixed(1)}% confidence)`, 
-                            false);
-                    } else if (quality > 0.5) {
-                        displayMessage(statusElementId, 
-                            `✓ Face captured (${(quality * 100).toFixed(1)}% confidence). You may recapture for better quality.`, 
-                            false);
-                    } else {
-                        displayMessage(statusElementId, 
-                            `⚠️ Low quality (${(quality * 100).toFixed(1)}%). Please improve lighting and try again.`, 
-                            true);
-                        faceScanBlob = null; // Reset to force recapture
-                        return;
-                    }
-                } else {
-                    displayMessage(statusElementId, 
-                        "⚠️ No face detected. Please ensure good lighting, face the camera directly, and try again.", 
-                        true);
-                    faceScanBlob = null;
-                    return;
+                    console.log(`Face detected with confidence ${minConfidence}:`, testDetection.score);
+                    break;
                 }
-            } catch (error) {
-                // If face detection fails, still allow capture but warn user
-                displayMessage(statusElementId, 
-                    "⚠️ Face captured but quality verification failed. Consider recapturing with better lighting.", 
-                    false);
             }
             
+            // Clean up
+            URL.revokeObjectURL(imageUrl);
+            
+            if (testDetection) {
+                const quality = testDetection.score;
+                faceScanBlob = blob;
+                
+                if (quality > 0.5) {
+                    displayMessage(statusElementId, 
+                        `✅ Excellent! Face captured (${(quality * 100).toFixed(1)}% confidence)`, 
+                        false);
+                } else if (quality > 0.3) {
+                    displayMessage(statusElementId, 
+                        `✓ Face captured (${(quality * 100).toFixed(1)}% confidence)`, 
+                        false);
+                } else {
+                    displayMessage(statusElementId, 
+                        `⚠️ Low quality (${(quality * 100).toFixed(1)}%). You may want to recapture.`, 
+                        false);
+                }
+                
+                stopCamera();
+            } else {
+                console.error('No face detected in captured image');
+                displayMessage(statusElementId, 
+                    "⚠️ No face detected. Please ensure good lighting, face the camera directly, and try again.", 
+                    true);
+                faceScanBlob = null;
+            }
+            
+        } catch (error) {
+            console.error('Face detection error:', error);
+            // Allow capture even if detection fails (fallback)
+            faceScanBlob = blob;
+            displayMessage(statusElementId, 
+                "✓ Image captured (face detection unavailable, but you can proceed)", 
+                false);
             stopCamera();
-        } else {
-            displayMessage(statusElementId, "Failed to capture image. Please try again.", true);
         }
     }, 'image/jpeg', 0.95);
 }
 
-/// 2. NEW: Lighting enhancement function
+//NEW: Lighting enhancement function
 function enhanceLighting(context, width, height) {
     // Get image data
     const imageData = context.getImageData(0, 0, width, height);
@@ -1057,7 +1137,6 @@ async function detectFaceWithHighConfidence(imageElement, imageName) {
     console.error(`All detection methods failed for ${imageName} - likely lighting issue`);
     return null;
 }
-
 // NEW: Comprehensive face validation with multiple checks
 async function performStrictFaceValidation(registeredDetection, liveDetection, matNo) {
     try {
