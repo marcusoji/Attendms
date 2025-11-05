@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>School Attendance System</title>
-     <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
 
@@ -31,19 +31,49 @@
                         <!-- Student Login Fields -->
                         <div class="form-fields" data-for-type="student">
                             <input type="text" name="matNo" placeholder="Matriculation Number" required>
+                            
+                            <!-- FIXED: Single face scan section with all features -->
                             <div class="face-scan-section">
                                 <h3>Face Scan Login</h3>
-                                <video id="video-preview-login" autoplay playsinline></video>
+                                
+                                <!-- Lighting tips -->
+                                <div class="lighting-tips">
+                                    <strong>💡 For Best Results:</strong>
+                                    <ul>
+                                        <li>✓ Face a window or light source</li>
+                                        <li>✓ Avoid shadows on your face</li>
+                                        <li>✓ Remove glasses, hats, or masks</li>
+                                        <li>✓ Look directly at the camera</li>
+                                        <li>✓ Keep your face centered</li>
+                                    </ul>
+                                </div>
+                                
+                                <!-- Video preview container -->
+                                <div style="position: relative; text-align: center;">
+                                    <video id="video-preview-login" autoplay playsinline></video>
+                                </div>
+                                
+                                <div class="face-frame-guide">
+                                    Position your face in the center and ensure good lighting
+                                </div>
+                                
                                 <div id="loginScanStatus" class="success-msg"></div>
-                                <button type="button" class="secondary-btn" onclick="startCamera('video-preview-login')">1. Start Camera</button>
-                                <button type="button" class="secondary-btn" onclick="captureFace('video-preview-login', 'loginScanStatus')">2. Capture Face</button>
+                                
+                                <button type="button" class="secondary-btn" onclick="startCamera('video-preview-login')">
+                                    📷 Start Camera
+                                </button>
+                                <button type="button" class="secondary-btn" onclick="captureFace('video-preview-login', 'loginScanStatus')">
+                                    📸 Capture Face
+                                </button>
                             </div>
                         </div>
+                        
                         <!-- Lecturer/Admin Login Fields -->
                         <div class="form-fields hidden" data-for-type="lecturer admin">
                             <input type="email" name="email" placeholder="Email Address" required>
                             <input type="password" name="password" placeholder="Password" required>
                         </div>
+                        
                         <div id="loginError" class="error-msg"></div>
                         <button type="submit">Login</button>
                     </form>
@@ -62,16 +92,45 @@
                             <input type="text" name="matNo" placeholder="Matriculation Number" required>
                             <input type="email" name="email" placeholder="Email Address" required>
                             <input type="tel" name="phone" placeholder="Phone Number" required>
+                            
+                            <!-- FIXED: Face scan section for registration -->
                             <div class="face-scan-section">
                                 <h3>Face Scan Registration</h3>
-                                <video id="video-preview-register" autoplay playsinline></video>
+                                
+                                <!-- Lighting tips -->
+                                <div class="lighting-tips">
+                                    <strong>💡 For Best Results:</strong>
+                                    <ul>
+                                        <li>✓ Face a window or light source</li>
+                                        <li>✓ Avoid shadows on your face</li>
+                                        <li>✓ Remove glasses, hats, or masks</li>
+                                        <li>✓ Look directly at the camera</li>
+                                        <li>✓ This photo will be used for future logins</li>
+                                    </ul>
+                                </div>
+                                
+                                <!-- Video preview container -->
+                                <div style="position: relative; text-align: center;">
+                                    <video id="video-preview-register" autoplay playsinline></video>
+                                </div>
+                                
+                                <div class="face-frame-guide">
+                                    Capture a clear photo - this will be used to verify your identity
+                                </div>
+                                
                                 <div id="registerScanStatus" class="success-msg"></div>
-                                <button type="button" class="secondary-btn" onclick="startCamera('video-preview-register')">1. Start Camera</button>
-                                <button type="button" class="secondary-btn" onclick="captureFace('video-preview-register', 'registerScanStatus')">2. Capture Face</button>
+                                
+                                <button type="button" class="secondary-btn" onclick="startCamera('video-preview-register')">
+                                    📷 Start Camera
+                                </button>
+                                <button type="button" class="secondary-btn" onclick="captureFace('video-preview-register', 'registerScanStatus')">
+                                    📸 Capture Face
+                                </button>
                             </div>
                         </div>
+                        
                         <!-- Lecturer Register Fields -->
-                        <div class="form-fields hidden" data-for-type="lecturer" >
+                        <div class="form-fields hidden" data-for-type="lecturer">
                             <p style="text-align: center; color: var(--text-dark);">Enter your details to create a lecturer account.</p>
                             <input type="text" name="name" placeholder="Full Name" required>
                             <input type="text" name="lecturer_id" placeholder="Lecturer ID" required>
@@ -79,6 +138,7 @@
                             <input type="tel" name="phone" placeholder="Phone Number" required>
                             <input type="password" name="password" placeholder="Password" required>
                         </div>
+                        
                          <div id="registerError" class="error-msg"></div>
                          <div id="registerSuccess" class="success-msg"></div>
                         <button type="submit">Register</button>
@@ -87,8 +147,6 @@
             </div>
         </div>
         
-    
-
         <!-- PAGE 2: STUDENT DASHBOARD -->
         <div id="studentDashboard" class="page">
              <div class="card">
@@ -174,16 +232,13 @@
 
     </div>
 
-<!-- Replace your existing face-api.js script section with this working version -->
-
-<!-- Use vladmandic/face-api which has working CDN models -->
+<!-- Face-API.js Library -->
 <script src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.13/dist/face-api.js"></script>
 
 <!-- Face API Initialization Script -->
 <script>
 let faceApiLoaded = false;
 
-// Check if face-api.js is properly loaded
 function isFaceApiReady() {
     return typeof faceapi !== 'undefined' && 
            faceapi.nets && 
@@ -192,7 +247,6 @@ function isFaceApiReady() {
            faceapi.nets.faceRecognitionNet;
 }
 
-// Update status messages
 function updateFaceStatus(message, isError = false) {
     const statusElements = document.querySelectorAll('[id$="ScanStatus"]');
     statusElements.forEach(el => {
@@ -202,12 +256,10 @@ function updateFaceStatus(message, isError = false) {
     console.log(isError ? 'ERROR:' : 'INFO:', message);
 }
 
-// Load face-api.js models with working CDN
 async function loadFaceApiModels() {
     try {
         updateFaceStatus('Checking face-api.js library...');
         
-        // Wait for face-api.js library to be available
         let attempts = 0;
         while (!isFaceApiReady() && attempts < 50) {
             await new Promise(resolve => setTimeout(resolve, 100));
@@ -220,7 +272,6 @@ async function loadFaceApiModels() {
         
         updateFaceStatus('Loading face recognition models...');
         
-        // Use the working vladmandic CDN for models
         const modelUrl = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.13/model';
         
         console.log(`Loading models from: ${modelUrl}`);
@@ -231,9 +282,8 @@ async function loadFaceApiModels() {
             faceapi.nets.faceRecognitionNet.loadFromUri(modelUrl)
         ]);
         
-        console.log(`Models loaded successfully from: ${modelUrl}`);
+        console.log(`Models loaded successfully`);
         
-        // Test the setup
         updateFaceStatus('Testing face detection...');
         await testFaceApi();
         
@@ -245,17 +295,14 @@ async function loadFaceApiModels() {
         faceApiLoaded = false;
         updateFaceStatus(`Face recognition failed: ${error.message}`, true);
         
-        // Provide fallback instructions
         setTimeout(() => {
             updateFaceStatus('Try refreshing the page or check your internet connection', true);
         }, 2000);
     }
 }
 
-// Test face-api functionality
 async function testFaceApi() {
     try {
-        // Create a test canvas
         const canvas = document.createElement('canvas');
         canvas.width = 100;
         canvas.height = 100;
@@ -263,7 +310,6 @@ async function testFaceApi() {
         ctx.fillStyle = '#f0f0f0';
         ctx.fillRect(0, 0, 100, 100);
         
-        // Try to run detection (should not error even with no faces)
         await faceapi.detectAllFaces(canvas);
         console.log('Face-API test passed');
         
@@ -272,29 +318,27 @@ async function testFaceApi() {
     }
 }
 
-// Add helper function if not already available
-if (!faceapi.bufferToImage) {
-    faceapi.bufferToImage = function(buffer) {
-        return new Promise((resolve, reject) => {
-            const img = new Image();
-            img.onload = () => resolve(img);
-            img.onerror = reject;
-            img.src = URL.createObjectURL(buffer);
-        });
-    };
+if (!faceapi || !faceapi.bufferToImage) {
+    if (typeof faceapi !== 'undefined') {
+        faceapi.bufferToImage = function(buffer) {
+            return new Promise((resolve, reject) => {
+                const img = new Image();
+                img.onload = () => resolve(img);
+                img.onerror = reject;
+                img.src = URL.createObjectURL(buffer);
+            });
+        };
+    }
 }
 
-// Initialize when everything is ready
 async function initializeFaceApi() {
     try {
-        // Wait for DOM
         if (document.readyState === 'loading') {
             await new Promise(resolve => {
                 document.addEventListener('DOMContentLoaded', resolve);
             });
         }
         
-        // Wait for face-api.js script
         updateFaceStatus('Loading face-api.js library...');
         
         let scriptLoadAttempts = 0;
@@ -307,7 +351,6 @@ async function initializeFaceApi() {
             throw new Error('face-api.js script failed to load');
         }
         
-        // Load models
         await loadFaceApiModels();
         
     } catch (error) {
@@ -316,14 +359,12 @@ async function initializeFaceApi() {
     }
 }
 
-// Manual retry function
 window.retryFaceApi = function() {
     console.log('Retrying face-api.js initialization...');
     faceApiLoaded = false;
     initializeFaceApi();
 };
 
-// Debug function
 window.debugFaceApi = function() {
     console.log('=== Face-API Debug Info ===');
     console.log('faceapi available:', typeof faceapi !== 'undefined');
@@ -335,11 +376,10 @@ window.debugFaceApi = function() {
     }
 };
 
-// Start initialization
 initializeFaceApi();
 </script>
 
-
+<!-- Main Application Script -->
 <script src="js/auth.js"></script>
 </body>
 </html>

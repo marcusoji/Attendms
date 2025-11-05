@@ -407,3 +407,275 @@
                 display: none !important;
             }
         }
+      /* Add these styles to your existing style.css file */
+
+/* Enhanced camera preview styling */
+.face-scan-section {
+    position: relative;
+    margin: 20px 0;
+    padding: 20px;
+    background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+    border-radius: 10px;
+}
+
+.face-scan-section h3 {
+    margin-top: 0;
+    color: var(--primary, #4f46e5);
+    text-align: center;
+    font-size: 1.3em;
+}
+
+/* Video element styling */
+video {
+    width: 100%;
+    max-width: 640px;
+    height: auto;
+    border-radius: 10px;
+    border: 3px solid var(--primary, #4f46e5);
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+    background: #000;
+    display: none;
+    margin: 15px auto;
+}
+
+video[style*="display: block"] {
+    display: block !important;
+}
+
+/* Lighting tips box */
+.lighting-tips {
+    background: #fffbeb;
+    border-left: 4px solid #f59e0b;
+    padding: 15px;
+    margin: 15px 0;
+    border-radius: 5px;
+    font-size: 14px;
+    line-height: 1.6;
+}
+
+.lighting-tips strong {
+    color: #f59e0b;
+    display: block;
+    margin-bottom: 10px;
+    font-size: 15px;
+}
+
+.lighting-tips ul {
+    margin: 10px 0;
+    padding-left: 20px;
+    list-style: none;
+}
+
+.lighting-tips li {
+    margin: 8px 0;
+    padding-left: 5px;
+}
+
+.lighting-tips li:before {
+    content: '';
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    background: #10b981;
+    border-radius: 50%;
+    margin-right: 8px;
+}
+
+/* Face frame guide */
+.face-frame-guide {
+    text-align: center;
+    color: #6b7280;
+    font-size: 13px;
+    margin: 10px 0;
+    padding: 10px;
+    background: #f9fafb;
+    border-radius: 5px;
+    font-weight: 500;
+}
+
+/* Camera button improvements */
+.face-scan-section button {
+    margin: 10px 5px;
+    min-width: 150px;
+    font-size: 14px;
+    padding: 12px 20px;
+}
+
+/* Quality indicator styles */
+.quality-indicator {
+    display: inline-block;
+    padding: 8px 15px;
+    border-radius: 20px;
+    font-weight: bold;
+    margin: 10px 0;
+    animation: pulse 2s ease-in-out infinite;
+}
+
+.quality-excellent {
+    background: #10b981;
+    color: white;
+}
+
+.quality-good {
+    background: #f59e0b;
+    color: white;
+}
+
+.quality-poor {
+    background: #ef4444;
+    color: white;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.8; }
+}
+
+/* Loading spinner for face detection */
+.detection-spinner {
+    display: inline-block;
+    width: 20px;
+    height: 20px;
+    border: 3px solid #f3f4f6;
+    border-top: 3px solid var(--primary, #4f46e5);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin-right: 10px;
+    vertical-align: middle;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* Better status messages */
+#loginScanStatus, 
+#registerScanStatus {
+    min-height: 25px;
+    padding: 12px;
+    margin: 15px 0;
+    border-radius: 8px;
+    font-weight: 500;
+    text-align: center;
+    font-size: 14px;
+    transition: all 0.3s ease;
+}
+
+#loginScanStatus:empty,
+#registerScanStatus:empty {
+    display: none;
+}
+
+/* Error and success message styling */
+.error-msg {
+    color: #dc2626;
+    background: #fef2f2;
+    border-left: 4px solid #dc2626;
+    padding: 12px;
+    margin: 10px 0;
+    border-radius: 4px;
+    font-size: 14px;
+}
+
+.success-msg {
+    color: #059669;
+    background: #f0fdf4;
+    border-left: 4px solid #059669;
+    padding: 12px;
+    margin: 10px 0;
+    border-radius: 4px;
+    font-size: 14px;
+}
+
+/* Lighting indicator overlay */
+#lightingIndicator {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    padding: 10px 15px;
+    background: rgba(0, 0, 0, 0.8);
+    color: white;
+    border-radius: 5px;
+    font-size: 13px;
+    z-index: 1000;
+    font-weight: 600;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+/* Hidden canvas for capture */
+#captureCanvas {
+    display: none !important;
+}
+
+.hidden {
+    display: none !important;
+}
+
+/* Responsive improvements */
+@media (max-width: 768px) {
+    video {
+        max-width: 100%;
+    }
+    
+    .face-scan-section {
+        padding: 15px;
+    }
+    
+    .face-scan-section button {
+        width: 100%;
+        margin: 5px 0;
+        min-width: auto;
+    }
+    
+    .lighting-tips {
+        font-size: 13px;
+        padding: 12px;
+    }
+    
+    .lighting-tips ul {
+        padding-left: 15px;
+    }
+}
+
+/* Animation for camera activation */
+@keyframes cameraActivate {
+    0% { opacity: 0; transform: scale(0.9); }
+    100% { opacity: 1; transform: scale(1); }
+}
+
+video[style*="display: block"] {
+    animation: cameraActivate 0.3s ease-out;
+}
+
+/* Button hover effects */
+.secondary-btn {
+    transition: all 0.3s ease;
+}
+
+.secondary-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.secondary-btn:active {
+    transform: translateY(0);
+}
+
+/* Capture feedback animation */
+@keyframes captureFlash {
+    0%, 100% { opacity: 0; }
+    50% { opacity: 0.8; }
+}
+
+.capture-flash {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: white;
+    animation: captureFlash 0.5s ease-out;
+    pointer-events: none;
+    border-radius: 10px;
+}

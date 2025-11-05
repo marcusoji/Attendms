@@ -106,19 +106,138 @@
             });
         }
 
-        // Camera Functions
-        async function startCamera(videoElementId) {
-            stopCamera();
-            const videoPreview = document.getElementById(videoElementId);
-            videoPreview.style.display = 'block';
-            try {
-                videoStream = await navigator.mediaDevices.getUserMedia({ video: true });
-                videoPreview.srcObject = videoStream;
-            } catch (err) {
-                console.error("Camera Error:", err);
-                displayMessage(videoElementId.includes('login') ? 'loginError' : 'registerError', 'Could not access camera. Please grant permission.');
+       // 3. UPDATED: Start camera with better video constraints
+async function startCamera(videoElementId) {
+    stopCamera();
+    const videoPreview = document.getElementById(videoElementId);
+    const statusElementId = videoElementId.includes('login') ? 'loginScanStatus' : 'registerScanStatus';
+    
+    videoPreview.style.display = 'block';
+    
+    try {
+        displayMessage(statusElementId, '📷 Starting camera...', false);
+        
+        // Request higher resolution and better lighting optimization
+        videoStream = await navigator.mediaDevices.getUserMedia({ 
+            video: {
+                width: { ideal: 1280, min: 640 },
+                height: { ideal: 720, min: 480 },
+                facingMode: 'user'
             }
+        });
+        
+        videoPreview.srcObject = videoStream;
+        
+        // Wait for video to be ready
+        await new Promise((resolve) => {
+            videoPreview.onloadedmetadata = () => {
+                videoPreview.play();
+                resolve();
+            };
+        });
+        
+        displayMessage(statusElementId, '✅ Camera ready! Position your face in the center.', false);
+        
+        // Show lighting quality indicator after camera starts
+        setTimeout(() => {
+            showLightingTips(videoElementId);
+        }, 1000);
+        
+    } catch (err) {
+        console.error("Camera Error:", err);
+        const errorMsg = videoElementId.includes('login') ? 'loginError' : 'registerError';
+        displayMessage(errorMsg, 'Could not access camera. Please grant permission and try again.');
+    }
+}
+
+
+// 4. NEW: Show lighting quality indicator
+function showLightingTips(videoElementId) {
+    const videoPreview = document.getElementById(videoElementId);
+    const statusElementId = videoElementId.includes('login') ? 'loginScanStatus' : 'registerScanStatus';
+    
+    // Create lighting indicator if it doesn't exist
+    let lightingIndicator = document.getElementById('lightingIndicator');
+    if (!lightingIndicator) {
+        lightingIndicator = document.createElement('div');
+        lightingIndicator.id = 'lightingIndicator';
+        lightingIndicator.style.cssText = `
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            padding: 10px 15px;
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            border-radius: 5px;
+            font-size: 12px;
+            z-index: 1000;
+        `;
+        videoPreview.parentElement.style.position = 'relative';
+        videoPreview.parentElement.appendChild(lightingIndicator);
+    }
+    
+    // Monitor lighting quality
+    const checkLighting = setInterval(() => {
+        if (!videoStream) {
+            clearInterval(checkLighting);
+            if (lightingIndicator) lightingIndicator.remove();
+            return;
         }
+        
+        // Create temporary canvas to analyze lighting
+        const tempCanvas = document.createElement('canvas');
+        const context = tempCanvas.getContext('2d');
+        tempCanvas.width = videoPreview.videoWidth;
+        tempCanvas.height = videoPreview.videoHeight;
+        
+        if (tempCanvas.width === 0) return;
+        
+        context.drawImage(videoPreview, 0, 0);
+        const imageData = context.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
+        const data = imageData.data;
+        
+        // Calculate brightness
+        let totalBrightness = 0;
+        for (let i = 0; i < data.length; i += 4) {
+            totalBrightness += (data[i] + data[i + 1] + data[i + 2]) / 3;
+        }
+        const avgBrightness = totalBrightness / (data.length / 4);
+        
+        // Update indicator
+        let message, color;
+        if (avgBrightness < 60) {
+            message = "🔴 Too Dark - Add more light";
+            color = "#ef4444";
+        } else if (avgBrightness < 100) {
+            message = "🟡 Low Light - Move to brighter area";
+            color = "#f59e0b";
+        } else if (avgBrightness > 200) {
+            message = "🔴 Too Bright - Reduce light";
+            color = "#ef4444";
+        } else {
+            message = "🟢 Good Lighting";
+            color = "#10b981";
+        }
+        
+        lightingIndicator.textContent = message;
+        lightingIndicator.style.background = color;
+        
+    }, 500); // Check every 500ms
+}
+
+// 5. NEW: Add lighting tips to UI
+function displayLightingGuidance(statusElementId) {
+    const tips = `
+        💡 Lighting Tips:
+        • Face a window or light source
+        • Avoid backlighting (light behind you)
+        • Use indoor lighting if outdoors is too bright
+        • Remove glasses or hats if possible
+        • Keep face centered in frame
+    `;
+    
+    displayMessage(statusElementId, tips, false);
+}
 
         function stopCamera() {
             if (videoStream) {
@@ -129,7 +248,7 @@
             document.getElementById('video-preview-register').style.display = 'none';
         }
         
-       // IMPROVED captureFace function with better image quality and validation
+      // 1. IMPROVED captureFace with lighting enhancement
 function captureFace(videoElementId, statusElementId) {
     const videoPreview = document.getElementById(videoElementId);
     if (!videoStream) {
@@ -143,17 +262,11 @@ function captureFace(videoElementId, statusElementId) {
         return;
     }
 
-    // Check for minimum video resolution
-    if (videoPreview.videoWidth < 240 || videoPreview.videoHeight < 180) {
-        displayMessage(statusElementId, "Camera resolution too low. Please try a different camera or improve lighting.", true);
-        return;
-    }
-
     const context = captureCanvas.getContext('2d');
     
-    // Set canvas size to match video (but ensure minimum size)
-    const width = Math.max(videoPreview.videoWidth, 320);
-    const height = Math.max(videoPreview.videoHeight, 240);
+    // Set canvas size to match video
+    const width = Math.max(videoPreview.videoWidth, 640);  // Increased minimum size
+    const height = Math.max(videoPreview.videoHeight, 480);
     
     captureCanvas.width = width;
     captureCanvas.height = height;
@@ -161,35 +274,111 @@ function captureFace(videoElementId, statusElementId) {
     // Clear canvas first
     context.clearRect(0, 0, width, height);
     
-    // Draw video frame with better quality settings
+    // Draw video frame
     context.imageSmoothingEnabled = true;
     context.imageSmoothingQuality = 'high';
     context.drawImage(videoPreview, 0, 0, width, height);
     
+    // ENHANCEMENT: Apply lighting correction
+    enhanceLighting(context, width, height);
+    
     // Convert to blob with high quality
     captureCanvas.toBlob(async (blob) => {
-        if (blob && blob.size > 1000) { // Ensure blob has reasonable size
+        if (blob && blob.size > 1000) {
             faceScanBlob = blob;
             
-            // Optional: Test if face can be detected immediately
+            // Test face detection quality
             try {
+                displayMessage(statusElementId, "Analyzing image quality...", false);
                 const testImage = await faceapi.bufferToImage(blob);
-                const testDetection = await faceapi.detectSingleFace(testImage, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.1 }));
+                const testDetection = await faceapi.detectSingleFace(
+                    testImage, 
+                    new faceapi.SsdMobilenetv1Options({ minConfidence: 0.5 })
+                );
                 
                 if (testDetection) {
-                    displayMessage(statusElementId, `Face captured successfully! (Detection confidence: ${(testDetection.score * 100).toFixed(1)}%)`, false);
+                    const quality = testDetection.score;
+                    if (quality > 0.7) {
+                        displayMessage(statusElementId, 
+                            `✅ Excellent capture! (${(quality * 100).toFixed(1)}% confidence)`, 
+                            false);
+                    } else if (quality > 0.5) {
+                        displayMessage(statusElementId, 
+                            `✓ Face captured (${(quality * 100).toFixed(1)}% confidence). You may recapture for better quality.`, 
+                            false);
+                    } else {
+                        displayMessage(statusElementId, 
+                            `⚠️ Low quality (${(quality * 100).toFixed(1)}%). Please improve lighting and try again.`, 
+                            true);
+                        faceScanBlob = null; // Reset to force recapture
+                        return;
+                    }
                 } else {
-                    displayMessage(statusElementId, "Face captured, but quality may be low. Consider recapturing with better lighting.", false);
+                    displayMessage(statusElementId, 
+                        "⚠️ No face detected. Please ensure good lighting, face the camera directly, and try again.", 
+                        true);
+                    faceScanBlob = null;
+                    return;
                 }
             } catch (error) {
-                displayMessage(statusElementId, "Face captured successfully!", false);
+                // If face detection fails, still allow capture but warn user
+                displayMessage(statusElementId, 
+                    "⚠️ Face captured but quality verification failed. Consider recapturing with better lighting.", 
+                    false);
             }
             
             stopCamera();
         } else {
-            displayMessage(statusElementId, "Failed to capture image or image too small. Please try again.", true);
+            displayMessage(statusElementId, "Failed to capture image. Please try again.", true);
         }
-    }, 'image/jpeg', 0.95); // Very high quality JPEG
+    }, 'image/jpeg', 0.95);
+}
+
+/// 2. NEW: Lighting enhancement function
+function enhanceLighting(context, width, height) {
+    // Get image data
+    const imageData = context.getImageData(0, 0, width, height);
+    const data = imageData.data;
+    
+    // Calculate average brightness
+    let totalBrightness = 0;
+    for (let i = 0; i < data.length; i += 4) {
+        const brightness = (data[i] + data[i + 1] + data[i + 2]) / 3;
+        totalBrightness += brightness;
+    }
+    const avgBrightness = totalBrightness / (data.length / 4);
+    
+    // Adjust brightness if too dark or too bright
+    let adjustment = 0;
+    if (avgBrightness < 100) {
+        // Image is too dark - brighten it
+        adjustment = (100 - avgBrightness) * 0.8;
+    } else if (avgBrightness > 180) {
+        // Image is too bright - darken it slightly
+        adjustment = (180 - avgBrightness) * 0.3;
+    }
+    
+    // Apply brightness adjustment
+    if (adjustment !== 0) {
+        for (let i = 0; i < data.length; i += 4) {
+            data[i] = Math.min(255, Math.max(0, data[i] + adjustment));     // Red
+            data[i + 1] = Math.min(255, Math.max(0, data[i + 1] + adjustment)); // Green
+            data[i + 2] = Math.min(255, Math.max(0, data[i + 2] + adjustment)); // Blue
+        }
+    }
+    
+    // Apply contrast enhancement
+    const contrast = 1.2; // Increase contrast
+    const factor = (259 * (contrast * 100 + 255)) / (255 * (259 - contrast * 100));
+    
+    for (let i = 0; i < data.length; i += 4) {
+        data[i] = Math.min(255, Math.max(0, factor * (data[i] - 128) + 128));
+        data[i + 1] = Math.min(255, Math.max(0, factor * (data[i + 1] - 128) + 128));
+        data[i + 2] = Math.min(255, Math.max(0, factor * (data[i + 2] - 128) + 128));
+    }
+    
+    // Put enhanced image back
+    context.putImageData(imageData, 0, 0);
 }
 
 // Add this function to test face detection capability
@@ -817,37 +1006,55 @@ async function handleStudentFaceLogin() {
     }
 }
 
-// NEW: Stricter face detection function
+// 6. UPDATED: Enhanced face detection with lighting tolerance
 async function detectFaceWithHighConfidence(imageElement, imageName) {
-    // Use higher confidence thresholds to get better quality detections
+    // Try with different confidence levels, starting lower for poor lighting
     const detectionOptions = [
-        new faceapi.SsdMobilenetv1Options({ minConfidence: 0.7 }), // High confidence first
-        new faceapi.SsdMobilenetv1Options({ minConfidence: 0.5 }), // Medium confidence
-        new faceapi.SsdMobilenetv1Options({ minConfidence: 0.3 })  // Lower confidence as fallback
+        new faceapi.SsdMobilenetv1Options({ minConfidence: 0.4 }), // More tolerant for poor lighting
+        new faceapi.SsdMobilenetv1Options({ minConfidence: 0.3 }), 
+        new faceapi.SsdMobilenetv1Options({ minConfidence: 0.2 })  
     ];
 
     for (const options of detectionOptions) {
         try {
-            console.log(`Trying high-confidence detection on ${imageName} with confidence ${options.minConfidence}...`);
+            console.log(`Trying detection on ${imageName} with confidence ${options.minConfidence}...`);
             
             const detection = await faceapi
                 .detectSingleFace(imageElement, options)
                 .withFaceLandmarks()
                 .withFaceDescriptor();
 
-            if (detection && detection.detection.score >= 0.5) {
-                console.log(`High-quality detection found for ${imageName}:`, {
+            if (detection && detection.detection.score >= 0.3) {
+                console.log(`Detection found for ${imageName}:`, {
                     score: detection.detection.score,
                     box: detection.detection.box
                 });
                 return detection;
             }
         } catch (error) {
-            console.warn(`Detection failed for ${imageName} with confidence ${options.minConfidence}:`, error.message);
+            console.warn(`Detection failed for ${imageName}:`, error.message);
         }
     }
 
-    console.error(`All high-confidence detection methods failed for ${imageName} image`);
+    // Try detectAllFaces as fallback
+    try {
+        const allDetections = await faceapi
+            .detectAllFaces(imageElement, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.2 }))
+            .withFaceLandmarks()
+            .withFaceDescriptors();
+
+        if (allDetections.length > 0) {
+            const bestDetection = allDetections.reduce((best, current) => 
+                current.detection.score > best.detection.score ? current : best
+            );
+            console.log(`Multi-face detection success for ${imageName}`);
+            return bestDetection;
+        }
+    } catch (error) {
+        console.warn(`Multi-face detection failed for ${imageName}:`, error.message);
+    }
+
+    console.error(`All detection methods failed for ${imageName} - likely lighting issue`);
     return null;
 }
 
