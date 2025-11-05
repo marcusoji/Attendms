@@ -1107,8 +1107,7 @@ async function handleLecturerAdminLogin() {
     loginSuccess(result.token, result.user);
 }
 
-// REPLACE the ENTIRE handleStudentFaceLogin function with this new version:
-// FIXED handleStudentFaceLogin function with stricter matching
+// UPDATED handleStudentFaceLogin function with better handling of poor quality registered images
 async function handleStudentFaceLogin() {
     if (!faceApiLoaded) throw new Error("Face recognition is still loading. Please wait.");
     if (!faceScanBlob) throw new Error("Please capture your face to log in.");
@@ -1130,32 +1129,50 @@ async function handleStudentFaceLogin() {
             throw new Error("No registered face scan found for this student.");
         }
 
+        displayMessage('loginError', 'Loading registered photo...', false);
+
         // Step 2: Create images with better error handling
         const registeredImage = await createImageFromBase64(studentData.faceScanData);
         const liveImage = await faceapi.bufferToImage(faceScanBlob);
 
-        displayMessage('loginError', 'Analyzing faces... Please wait.', false);
+        displayMessage('loginError', 'Analyzing faces...', false);
 
-        // Step 3: Use stricter detection with higher confidence
-        const registeredDetections = await detectFaceWithHighConfidence(registeredImage, 'registered');
-        const liveDetections = await detectFaceWithHighConfidence(liveImage, 'live');
+        // Step 3: Try VERY lenient detection for both images
+        const registeredDetections = await detectFaceWithVeryLowConfidence(registeredImage, 'registered');
+        const liveDetections = await detectFaceWithVeryLowConfidence(liveImage, 'live');
 
-        // Provide specific feedback about which image failed
+        // Handle cases where detection fails
+        if (!registeredDetections && !liveDetections) {
+            throw new Error("Face detection failed for both images. This usually means:\n\n" +
+                "1. Your registered photo is too dark/unclear\n" +
+                "2. Current lighting is also poor\n\n" +
+                "Solution: Contact admin to re-register with better lighting, or try again in a brighter location.");
+        }
+        
         if (!registeredDetections) {
-            throw new Error("Could not detect face in registered image. Contact admin to re-register with a clearer photo.");
+            throw new Error("Could not detect face in your registered photo (taken in poor lighting).\n\n" +
+                "You need to re-register with a clearer photo. Contact admin or:\n" +
+                "1. Switch to 'Register' tab\n" +
+                "2. Use your mat number to register again\n" +
+                "3. Ensure good lighting this time");
         }
         
         if (!liveDetections) {
-            throw new Error("Could not detect your face in current photo. Please ensure good lighting and face the camera directly.");
+            throw new Error("Could not detect your face in current photo.\n\n" +
+                "Please:\n" +
+                "1. Move to a brighter location\n" +
+                "2. Face the camera directly\n" +
+                "3. Remove any obstructions\n" +
+                "4. Try capturing again");
         }
 
-        displayMessage('loginError', 'Comparing faces... Please wait.', false);
+        displayMessage('loginError', 'Comparing faces...', false);
 
-        // Step 4: STRICTER face matching with multiple validation layers
-        const isValidMatch = await performStrictFaceValidation(registeredDetections, liveDetections, matNo);
+        // Step 4: Perform face matching with lenient threshold
+        const isValidMatch = await performLenientFaceValidation(registeredDetections, liveDetections, matNo);
         
         if (isValidMatch.success) {
-            displayMessage('loginError', `Face verified! (${isValidMatch.similarity}% match) Logging in...`, false);
+            displayMessage('loginError', `✅ Face verified! (${isValidMatch.similarity}% match) Logging in...`, false);
             loginSuccess(studentData.token, studentData.user);
         } else {
             throw new Error(isValidMatch.error);
@@ -1167,13 +1184,49 @@ async function handleStudentFaceLogin() {
     }
 }
 
-// 6. UPDATED: Enhanced face detection with lighting tolerance
+
+// NEW: Stricter face detection function
 async function detectFaceWithHighConfidence(imageElement, imageName) {
-    // Try with different confidence levels, starting lower for poor lighting
+    // Use higher confidence thresholds to get better quality detections
     const detectionOptions = [
-        new faceapi.SsdMobilenetv1Options({ minConfidence: 0.4 }), // More tolerant for poor lighting
-        new faceapi.SsdMobilenetv1Options({ minConfidence: 0.3 }), 
-        new faceapi.SsdMobilenetv1Options({ minConfidence: 0.2 })  
+        new faceapi.SsdMobilenetv1Options({ minConfidence: 0.7 }), // High confidence first
+        new faceapi.SsdMobilenetv1Options({ minConfidence: 0.5 }), // Medium confidence
+        new faceapi.SsdMobilenetv1Options({ minConfidence: 0.3 })  // Lower confidence as fallback
+    ];
+
+    for (const options of detectionOptions) {
+        try {
+            console.log(`Trying high-confidence detection on ${imageName} with confidence ${options.minConfidence}...`);
+            
+            const detection = await faceapi
+                .detectSingleFace(imageElement, options)
+                .withFaceLandmarks()
+                .withFaceDescriptor();
+
+            if (detection && detection.detection.score >= 0.5) {
+                console.log(`High-quality detection found for ${imageName}:`, {
+                    score: detection.detection.score,
+                    box: detection.detection.box
+                });
+                return detection;
+            }
+        } catch (error) {
+            console.warn(`Detection failed for ${imageName} with confidence ${options.minConfidence}:`, error.message);
+        }
+    }
+
+    console.error(`All high-confidence detection methods failed for ${imageName} image`);
+    return null;
+}
+// NEW: Very lenient face detection for poor quality images
+async function detectFaceWithVeryLowConfidence(imageElement, imageName) {
+    // Try EXTREMELY lenient thresholds for poor quality images
+    const detectionOptions = [
+        new faceapi.SsdMobilenetv1Options({ minConfidence: 0.3 }),
+        new faceapi.SsdMobilenetv1Options({ minConfidence: 0.2 }),
+        new faceapi.SsdMobilenetv1Options({ minConfidence: 0.1 }),
+        new faceapi.SsdMobilenetv1Options({ minConfidence: 0.05 }),
+        new faceapi.SsdMobilenetv1Options({ minConfidence: 0.01 })
     ];
 
     for (const options of detectionOptions) {
@@ -1185,10 +1238,10 @@ async function detectFaceWithHighConfidence(imageElement, imageName) {
                 .withFaceLandmarks()
                 .withFaceDescriptor();
 
-            if (detection && detection.detection.score >= 0.3) {
+            if (detection) {
                 console.log(`Detection found for ${imageName}:`, {
                     score: detection.detection.score,
-                    box: detection.detection.box
+                    confidence: options.minConfidence
                 });
                 return detection;
             }
@@ -1197,10 +1250,11 @@ async function detectFaceWithHighConfidence(imageElement, imageName) {
         }
     }
 
-    // Try detectAllFaces as fallback
+    // Final attempt: Try detecting all faces and pick best one
     try {
+        console.log(`Trying multi-face detection on ${imageName}...`);
         const allDetections = await faceapi
-            .detectAllFaces(imageElement, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.2 }))
+            .detectAllFaces(imageElement, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.01 }))
             .withFaceLandmarks()
             .withFaceDescriptors();
 
@@ -1208,15 +1262,127 @@ async function detectFaceWithHighConfidence(imageElement, imageName) {
             const bestDetection = allDetections.reduce((best, current) => 
                 current.detection.score > best.detection.score ? current : best
             );
-            console.log(`Multi-face detection success for ${imageName}`);
+            console.log(`Multi-face detection success for ${imageName}, found ${allDetections.length} faces`);
             return bestDetection;
         }
     } catch (error) {
         console.warn(`Multi-face detection failed for ${imageName}:`, error.message);
     }
 
-    console.error(`All detection methods failed for ${imageName} - likely lighting issue`);
+    console.error(`All detection methods failed for ${imageName} - image quality too poor`);
     return null;
+}
+
+// NEW: More lenient face validation that accounts for different cameras/devices
+async function performLenientFaceValidation(registeredDetection, liveDetection, matNo) {
+    try {
+        // MUCH MORE LENIENT thresholds for cross-device matching
+        const VERY_LENIENT_THRESHOLD = 0.70; // Was 0.55 - now MUCH more lenient for different devices
+        const MODERATE_THRESHOLD = 0.80; // Was 0.65
+        const STRICT_THRESHOLD = 0.90; // For very poor matches
+
+        // Calculate face descriptor distance
+        const distance = faceapi.euclideanDistance(registeredDetection.descriptor, liveDetection.descriptor);
+        const similarity = ((1 - distance) * 100).toFixed(1);
+        
+        console.log(`Face matching for ${matNo}:`, {
+            distance: distance,
+            similarity: similarity,
+            veryLenientThreshold: VERY_LENIENT_THRESHOLD,
+            registeredConfidence: registeredDetection.detection.score,
+            liveConfidence: liveDetection.detection.score,
+            registeredBoxSize: registeredDetection.detection.box,
+            liveBoxSize: liveDetection.detection.box
+        });
+
+        // Calculate additional similarity metrics for cross-device matching
+        const registeredBox = registeredDetection.detection.box;
+        const liveBox = liveDetection.detection.box;
+        
+        // Check if face sizes are drastically different (different cameras)
+        const sizeRatio = Math.max(registeredBox.width, registeredBox.height) / 
+                         Math.max(liveBox.width, liveBox.height);
+        const isDifferentDevice = sizeRatio < 0.5 || sizeRatio > 2.0;
+        
+        console.log('Device difference check:', {
+            sizeRatio,
+            isDifferentDevice,
+            registeredSize: `${registeredBox.width}x${registeredBox.height}`,
+            liveSize: `${liveBox.width}x${liveBox.height}`
+        });
+
+        // If registered image OR current image has very low confidence, be VERY lenient
+        const hasLowConfidence = registeredDetection.detection.score < 0.3 || 
+                                liveDetection.detection.score < 0.3;
+        
+        // Determine appropriate threshold based on conditions
+        let effectiveThreshold = VERY_LENIENT_THRESHOLD;
+        let requirementMessage = '>30%';
+        
+        if (isDifferentDevice || hasLowConfidence) {
+            effectiveThreshold = STRICT_THRESHOLD; // 0.90 = accept 10% similarity
+            requirementMessage = '>10%';
+            console.log('Using VERY lenient threshold due to different device or low confidence');
+        } else if (registeredDetection.detection.score < 0.5) {
+            effectiveThreshold = MODERATE_THRESHOLD; // 0.80 = accept 20% similarity
+            requirementMessage = '>20%';
+            console.log('Using moderate threshold due to low registered image quality');
+        }
+
+        // Check against effective threshold
+        if (distance > effectiveThreshold) {
+            return {
+                success: false,
+                similarity: similarity,
+                error: `Face verification failed (${similarity}% similarity).\n\n` +
+                       `Required: ${requirementMessage}\n\n` +
+                       `Tips:\n` +
+                       `• Ensure you're using similar lighting to your registration\n` +
+                       `• Face the camera at the same angle\n` +
+                       `• Remove glasses/hat if you weren't wearing them during registration\n` +
+                       `• Try using the same device you used to register\n\n` +
+                       `Or re-register with the device you're currently using.`
+            };
+        }
+
+        // For matches between 10-30%, perform additional validation
+        if (distance > VERY_LENIENT_THRESHOLD && distance <= effectiveThreshold) {
+            console.log('Low similarity match - performing additional validation');
+            
+            // Check basic facial structure
+            const structuralSimilarity = await checkStructuralSimilarity(
+                registeredDetection, 
+                liveDetection
+            );
+            
+            if (!structuralSimilarity.passed) {
+                return {
+                    success: false,
+                    similarity: similarity,
+                    error: `Face structure doesn't match (${similarity}% similarity).\n\n` +
+                           `${structuralSimilarity.reason}\n\n` +
+                           `This might be a different person or very different conditions.`
+                };
+            }
+            
+            console.log('Structural validation passed despite low similarity');
+        }
+
+        // Success
+        return {
+            success: true,
+            similarity: similarity,
+            distance: distance,
+            usedLenientThreshold: effectiveThreshold > VERY_LENIENT_THRESHOLD
+        };
+
+    } catch (error) {
+        console.error('Face validation error:', error);
+        return {
+            success: false,
+            error: 'Face validation system error. Please try again.'
+        };
+    }
 }
 // NEW: Comprehensive face validation with multiple checks
 async function performStrictFaceValidation(registeredDetection, liveDetection, matNo) {
@@ -1274,6 +1440,80 @@ async function performStrictFaceValidation(registeredDetection, liveDetection, m
     }
 }
 
+// NEW: Check structural similarity for low-confidence matches
+async function checkStructuralSimilarity(registered, live) {
+    try {
+        // Get face landmarks for both images
+        const regLandmarks = registered.landmarks.positions;
+        const liveLandmarks = live.landmarks.positions;
+        
+        if (!regLandmarks || !liveLandmarks) {
+            return { passed: true }; // Can't validate, allow match
+        }
+        
+        // Calculate key facial proportions
+        const getProportions = (landmarks) => {
+            // Eye to eye distance
+            const leftEye = landmarks[36]; // Left eye outer corner
+            const rightEye = landmarks[45]; // Right eye outer corner
+            const eyeDistance = Math.sqrt(
+                Math.pow(rightEye.x - leftEye.x, 2) + 
+                Math.pow(rightEye.y - leftEye.y, 2)
+            );
+            
+            // Nose to chin distance
+            const noseTip = landmarks[30];
+            const chin = landmarks[8];
+            const faceHeight = Math.sqrt(
+                Math.pow(chin.x - noseTip.x, 2) + 
+                Math.pow(chin.y - noseTip.y, 2)
+            );
+            
+            // Face width (jaw)
+            const leftJaw = landmarks[0];
+            const rightJaw = landmarks[16];
+            const faceWidth = Math.sqrt(
+                Math.pow(rightJaw.x - leftJaw.x, 2) + 
+                Math.pow(rightJaw.y - leftJaw.y, 2)
+            );
+            
+            return {
+                eyeToHeightRatio: eyeDistance / faceHeight,
+                widthToHeightRatio: faceWidth / faceHeight
+            };
+        };
+        
+        const regProps = getProportions(regLandmarks);
+        const liveProps = getProportions(liveLandmarks);
+        
+        // Check if proportions are similar (allow 30% variance for different angles/cameras)
+        const eyeRatioDiff = Math.abs(regProps.eyeToHeightRatio - liveProps.eyeToHeightRatio) / 
+                            regProps.eyeToHeightRatio;
+        const widthRatioDiff = Math.abs(regProps.widthToHeightRatio - liveProps.widthToHeightRatio) / 
+                              regProps.widthToHeightRatio;
+        
+        console.log('Structural similarity check:', {
+            eyeRatioDiff,
+            widthRatioDiff,
+            regProps,
+            liveProps
+        });
+        
+        if (eyeRatioDiff > 0.4 || widthRatioDiff > 0.4) {
+            return {
+                passed: false,
+                reason: 'Facial proportions are too different. This appears to be a different person.'
+            };
+        }
+        
+        return { passed: true };
+        
+    } catch (error) {
+        console.error('Structural similarity check error:', error);
+        return { passed: true }; // On error, allow the match
+    }
+}
+
 // NEW: Additional face validation checks
 async function performAdditionalFaceChecks(registeredDetection, liveDetection) {
     try {
@@ -1318,6 +1558,7 @@ async function performAdditionalFaceChecks(registeredDetection, liveDetection) {
         };
     }
 }
+
 
 // UPDATED: Create face matcher with stricter settings
 function createStrictFaceMatcher(knownFaces, threshold = 0.45) {
