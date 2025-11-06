@@ -484,7 +484,7 @@ video[style*="display: block"] {
 /* Face frame guide */
 .face-frame-guide {
     text-align: center;
-    color: #6b7280;
+    color: blue;
     font-size: 13px;
     margin: 10px 0;
     padding: 10px;
@@ -635,6 +635,7 @@ video[style*="display: block"] {
     
     .lighting-tips ul {
         padding-left: 15px;
+        color: #000;
     }
 }
 
