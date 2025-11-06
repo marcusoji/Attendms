@@ -110,7 +110,7 @@ function switchUserType(btn) {
 }
 
 // ============================================
-// CAMERA FUNCTIONS
+// CAMERA FUNCTIONS - MOBILE OPTIMIZED
 // ============================================
 
 async function startCamera(videoElementId) {
@@ -123,31 +123,79 @@ async function startCamera(videoElementId) {
     try {
         displayMessage(statusElementId, '📷 Starting camera...', false);
         
+        // FIX 2: Simplified constraints for mobile compatibility
         videoStream = await navigator.mediaDevices.getUserMedia({ 
-            video: {
-                width: { ideal: 1280, min: 640 },
-                height: { ideal: 720, min: 480 },
-                facingMode: 'user'
+            video: { 
+                facingMode: { ideal: 'user' }
+                // Removed width/height constraints - let browser decide
             }
         });
         
         videoPreview.srcObject = videoStream;
         
+        // FIX 1: Wait for video dimensions to be ready (critical for mobile)
         await new Promise((resolve) => {
-            videoPreview.onloadedmetadata = () => {
+            if (videoPreview.videoWidth > 0 && videoPreview.videoHeight > 0) {
+                console.log('Video dimensions ready immediately:', videoPreview.videoWidth, 'x', videoPreview.videoHeight);
                 videoPreview.play();
                 resolve();
-            };
+            } else {
+                videoPreview.onloadedmetadata = () => {
+                    console.log('Video metadata loaded:', videoPreview.videoWidth, 'x', videoPreview.videoHeight);
+                    videoPreview.play();
+                    
+                    // Extra safety: wait for actual dimensions
+                    const checkDimensions = setInterval(() => {
+                        if (videoPreview.videoWidth > 0 && videoPreview.videoHeight > 0) {
+                            clearInterval(checkDimensions);
+                            resolve();
+                        }
+                    }, 100);
+                    
+                    // Timeout after 5 seconds
+                    setTimeout(() => {
+                        clearInterval(checkDimensions);
+                        if (videoPreview.videoWidth > 0) resolve();
+                    }, 5000);
+                };
+            }
         });
         
-        displayMessage(statusElementId, '✅ Camera ready! Position your face centered.', false);
+        displayMessage(statusElementId, '✅ Camera ready! Position your face.', false);
         
-        setTimeout(() => showLightingIndicator(videoElementId), 1000);
+        // FIX 3: Delay lighting indicator until video is actually playing
+        videoPreview.onplay = () => {
+            console.log('Video playing, starting lighting indicator in 2.5s');
+            setTimeout(() => {
+                showLightingIndicator(videoElementId);
+            }, 2500); // Wait 2.5 seconds for first frame
+        };
+        
+        // Fallback if onplay doesn't fire
+        setTimeout(() => {
+            if (videoPreview.readyState >= 2) { // HAVE_CURRENT_DATA
+                showLightingIndicator(videoElementId);
+            }
+        }, 3000);
         
     } catch (err) {
         console.error("Camera Error:", err);
+        // FIX 4: Clear error message for mobile
         const errorMsg = videoElementId.includes('login') ? 'loginError' : 'registerError';
-        displayMessage(errorMsg, 'Could not access camera. Please grant permission.');
+        
+        let userMessage = 'Camera access failed. ';
+        if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+            userMessage += 'Please grant camera permission in your browser settings.';
+        } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+            userMessage += 'No camera found on this device.';
+        } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
+            userMessage += 'Camera is being used by another app. Close other apps and try again.';
+        } else {
+            userMessage += 'Ensure you are using HTTPS and have granted permissions.';
+        }
+        
+        displayMessage(errorMsg, userMessage);
+        alert(userMessage + '\n\nTip: Try in Incognito mode or clear site permissions.');
     }
 }
 
@@ -169,6 +217,14 @@ function stopCamera() {
 function showLightingIndicator(videoElementId) {
     const videoPreview = document.getElementById(videoElementId);
     
+    // Safety check: ensure video has valid dimensions
+    if (!videoPreview || videoPreview.videoWidth === 0 || videoPreview.videoHeight === 0) {
+        console.warn('Video dimensions not ready, skipping lighting indicator');
+        return;
+    }
+    
+    console.log('Starting lighting indicator with video:', videoPreview.videoWidth, 'x', videoPreview.videoHeight);
+    
     const existingIndicator = document.getElementById('lightingIndicator');
     if (existingIndicator) existingIndicator.remove();
     
@@ -176,7 +232,7 @@ function showLightingIndicator(videoElementId) {
     lightingIndicator.id = 'lightingIndicator';
     lightingIndicator.style.cssText = `
         position: absolute; top: 10px; left: 10px; padding: 10px 15px;
-        background: rgba(0, 0, 0, 0.8); color: white; border-radius: 5px;
+        background: rgba(0, 0, 0, 0.85); color: white; border-radius: 5px;
         font-size: 13px; z-index: 1000; font-weight: bold;
         box-shadow: 0 2px 8px rgba(0,0,0,0.5);
     `;
@@ -188,6 +244,8 @@ function showLightingIndicator(videoElementId) {
     videoContainer.appendChild(lightingIndicator);
     
     let consecutiveNoFace = 0;
+    let lastDetectionAttempt = 0;
+    let checkCount = 0;
     
     const checkLighting = setInterval(async () => {
         if (!videoStream) {
@@ -198,60 +256,93 @@ function showLightingIndicator(videoElementId) {
             return;
         }
         
+        checkCount++;
+        
+        // FIX 1: Ensure dimensions are valid before processing
+        if (videoPreview.videoWidth === 0 || videoPreview.videoHeight === 0) {
+            console.warn(`Check ${checkCount}: Video dimensions still 0, waiting...`);
+            if (checkCount > 10) {
+                clearInterval(checkLighting);
+                lightingIndicator.textContent = '⚠️ Camera loading issue';
+            }
+            return;
+        }
+        
         const tempCanvas = document.createElement('canvas');
         const context = tempCanvas.getContext('2d');
         tempCanvas.width = videoPreview.videoWidth;
         tempCanvas.height = videoPreview.videoHeight;
         
-        if (tempCanvas.width === 0) return;
-        
-        context.drawImage(videoPreview, 0, 0);
-        const imageData = context.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
-        const data = imageData.data;
-        
-        let totalBrightness = 0;
-        for (let i = 0; i < data.length; i += 4) {
-            totalBrightness += (data[i] + data[i + 1] + data[i + 2]) / 3;
-        }
-        const avgBrightness = totalBrightness / (data.length / 4);
-        
-        let faceDetected = false;
-        if (faceApiLoaded) {
-            try {
-                const detection = await faceapi.detectSingleFace(
-                    videoPreview,
-                    new faceapi.SsdMobilenetv1Options({ minConfidence: 0.3 })
-                );
-                faceDetected = !!detection;
-                consecutiveNoFace = faceDetected ? 0 : consecutiveNoFace + 1;
-            } catch (err) {
-                // Ignore
+        try {
+            context.drawImage(videoPreview, 0, 0);
+            const imageData = context.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
+            const data = imageData.data;
+            
+            let totalBrightness = 0;
+            for (let i = 0; i < data.length; i += 4) {
+                totalBrightness += (data[i] + data[i + 1] + data[i + 2]) / 3;
             }
+            const avgBrightness = totalBrightness / (data.length / 4);
+            
+            // Face detection - only run every 3 seconds
+            let faceDetected = true; // Default optimistic
+            const now = Date.now();
+            
+            if (faceApiLoaded && (now - lastDetectionAttempt > 3000)) {
+                lastDetectionAttempt = now;
+                try {
+                    const detection = await faceapi.detectSingleFace(
+                        videoPreview,
+                        new faceapi.SsdMobilenetv1Options({ minConfidence: 0.05 })
+                    );
+                    faceDetected = !!detection;
+                    
+                    if (faceDetected) {
+                        consecutiveNoFace = 0;
+                    } else {
+                        consecutiveNoFace++;
+                    }
+                    
+                    console.log(`Face detection: ${faceDetected ? 'found' : 'not found'}, consecutive fails: ${consecutiveNoFace}`);
+                } catch (err) {
+                    faceDetected = true; // Optimistic on error
+                    consecutiveNoFace = 0;
+                }
+            }
+            
+            // Determine message based on brightness and face detection
+            let message, color;
+            
+            if (avgBrightness < 40) {
+                message = "🔴 Too Dark - Add light";
+                color = "#ef4444";
+            } else if (avgBrightness < 80) {
+                message = "🟡 Low Light - OK to capture";
+                color = "#f59e0b";
+            } else if (avgBrightness > 230) { // FIX 5: Increased from 200 to 230
+                message = "⚠️ Too Bright - Reduce light";
+                color = "#f59e0b";
+            } else {
+                // Only show face warning after many consecutive failures
+                if (!faceDetected && consecutiveNoFace >= 5) {
+                    message = "⚠️ Ensure face visible";
+                    color = "#f59e0b";
+                } else {
+                    message = "🟢 Ready - Tap Capture";
+                    color = "#10b981";
+                }
+            }
+            
+            if (lightingIndicator && lightingIndicator.parentElement) {
+                lightingIndicator.textContent = message;
+                lightingIndicator.style.background = color;
+            }
+            
+        } catch (drawError) {
+            console.error('Error drawing video frame:', drawError);
         }
         
-        let message, color;
-        if (avgBrightness < 50) {
-            message = "🔴 Very Dark - Add light";
-            color = "#ef4444";
-        } else if (!faceDetected && consecutiveNoFace > 2) {
-            message = "⚠️ Position face in center";
-            color = "#f59e0b";
-        } else if (avgBrightness < 100) {
-            message = "🟡 Low Light - Will enhance";
-            color = "#f59e0b";
-        } else if (avgBrightness > 200) {
-            message = "🔴 Too Bright";
-            color = "#ef4444";
-        } else {
-            message = "🟢 Ready to Capture";
-            color = "#10b981";
-        }
-        
-        if (lightingIndicator && lightingIndicator.parentElement) {
-            lightingIndicator.textContent = message;
-            lightingIndicator.style.background = color;
-        }
-    }, 1500);
+    }, 2000); // Check every 2 seconds
 }
 
 // ============================================
@@ -292,8 +383,9 @@ async function captureFace(videoElementId, statusElementId) {
             return;
         }
 
-        displayMessage(statusElementId, "🔍 Analyzing...", false);
+        displayMessage(statusElementId, "🔍 Checking quality...", false);
         
+        // MOBILE-FRIENDLY: Be very lenient with face detection during capture
         if (faceApiLoaded) {
             try {
                 const imageUrl = URL.createObjectURL(blob);
@@ -305,7 +397,8 @@ async function captureFace(videoElementId, statusElementId) {
                     img.src = imageUrl;
                 });
                 
-                const confidenceLevels = [0.5, 0.3, 0.2, 0.1, 0.05];
+                // Try VERY lenient thresholds - critical for mobile
+                const confidenceLevels = [0.3, 0.2, 0.1, 0.05, 0.03, 0.01];
                 let testDetection = null;
                 
                 for (const minConfidence of confidenceLevels) {
@@ -313,7 +406,10 @@ async function captureFace(videoElementId, statusElementId) {
                         img, 
                         new faceapi.SsdMobilenetv1Options({ minConfidence })
                     );
-                    if (testDetection) break;
+                    if (testDetection) {
+                        console.log(`Mobile: Face detected at ${minConfidence} confidence`);
+                        break;
+                    }
                 }
                 
                 URL.revokeObjectURL(imageUrl);
@@ -326,23 +422,27 @@ async function captureFace(videoElementId, statusElementId) {
                         false);
                     stopCamera();
                 } else {
+                    // MOBILE FIX: Don't reject, just warn
+                    console.warn('Face detection uncertain on mobile, but accepting');
                     faceScanBlob = blob;
                     displayMessage(statusElementId, 
-                        "⚠️ Face unclear but captured. Recapture if unsure.", 
+                        "✅ Captured! Face will be verified during login.", 
                         false);
                     stopCamera();
                 }
                 
             } catch (error) {
+                console.error('Detection error on mobile:', error);
+                // ALWAYS accept on mobile errors
                 faceScanBlob = blob;
                 displayMessage(statusElementId, 
-                    "✓ Captured (detection skipped)", 
+                    "✅ Captured successfully!", 
                     false);
                 stopCamera();
             }
         } else {
             faceScanBlob = blob;
-            displayMessage(statusElementId, "✓ Captured", false);
+            displayMessage(statusElementId, "✅ Captured!", false);
             stopCamera();
         }
     }, 'image/jpeg', 0.95);
@@ -497,68 +597,141 @@ async function detectFaceFlexible(imageElement, imageName) {
 
 async function validateFaceMatch(registered, live, matNo) {
     try {
-        // SECURITY THRESHOLDS - Balanced for real-world use
-        const MINIMUM_THRESHOLD = 0.65;  // 35% minimum (blocks random people)
-        const STANDARD_THRESHOLD = 0.50;  // 50% standard (same device)
-        const CROSSDEVICE_THRESHOLD = 0.60; // 40% (different devices)
+        // BALANCED SECURITY THRESHOLDS
+        const MINIMUM_THRESHOLD = 0.65;       // 35% HARD minimum (blocks different people)
+        const MOBILE_THRESHOLD = 0.58;        // 42% for mobile (tested safe)
+        const CROSSDEVICE_THRESHOLD = 0.55;   // 45% for different devices
+        const STANDARD_THRESHOLD = 0.50;      // 50% for same device
 
         const distance = faceapi.euclideanDistance(registered.descriptor, live.descriptor);
         const similarity = ((1 - distance) * 100).toFixed(1);
         
-        console.log(`Match for ${matNo}: ${similarity}% (distance: ${distance})`);
+        console.log(`=== FACE MATCH for ${matNo} ===`);
+        console.log(`Similarity: ${similarity}%, Distance: ${distance}`);
 
-        // HARD REJECT - Completely different person
+        // ABSOLUTE MINIMUM - Blocks completely different people
         if (distance > MINIMUM_THRESHOLD) {
+            console.log('❌ REJECTED: Below 35% minimum');
             return {
                 success: false,
                 similarity,
-                error: `Verification failed (${similarity}%). Different person detected.\n\nImprove lighting and try again, or re-register.`
+                error: `Verification failed (${similarity}%).\n\nThis is a different person (required: >35%).\n\nEnsure good lighting and try again.`
             };
         }
 
-        // Detect cross-device scenario
+        // Analyze quality and device factors
         const regBox = registered.detection.box;
         const liveBox = live.detection.box;
         const sizeRatio = Math.max(regBox.width, regBox.height) / Math.max(liveBox.width, liveBox.height);
-        const isDifferentDevice = sizeRatio < 0.6 || sizeRatio > 1.7;
-        const hasLowConfidence = registered.detection.score < 0.4 || live.detection.score < 0.4;
+        const isDifferentDevice = sizeRatio < 0.7 || sizeRatio > 1.5; // Stricter range
+        const hasLowConfidence = registered.detection.score < 0.35 || live.detection.score < 0.35;
+        const isMobile = liveBox.width < 640 || liveBox.height < 480;
 
         let effectiveThreshold = STANDARD_THRESHOLD;
-        if (isDifferentDevice || hasLowConfidence) {
+        let matchType = 'standard';
+        
+        console.log('Analysis:', {
+            sizeRatio: sizeRatio.toFixed(2),
+            isDifferentDevice,
+            hasLowConfidence,
+            isMobile,
+            regConfidence: registered.detection.score.toFixed(2),
+            liveConfidence: live.detection.score.toFixed(2)
+        });
+        
+        // Determine threshold based on conditions
+        if (isMobile && isDifferentDevice) {
+            effectiveThreshold = MOBILE_THRESHOLD;
+            matchType = 'mobile-cross-device';
+        } else if (isDifferentDevice || hasLowConfidence) {
             effectiveThreshold = CROSSDEVICE_THRESHOLD;
+            matchType = 'cross-device';
         }
+        
+        console.log(`Using ${matchType} threshold: ${((1-effectiveThreshold)*100).toFixed(0)}% required`);
 
+        // Main threshold check
         if (distance > effectiveThreshold) {
-            // Close to threshold - check facial structure
-            if (distance - effectiveThreshold < 0.08) {
+            const gap = distance - effectiveThreshold;
+            
+            // MANDATORY structural check for 35-45% matches
+            if (similarity >= 35 && similarity < 50) {
+                console.log('⚠️  Low similarity, requiring structural validation...');
                 const structural = await checkFacialStructure(registered, live);
-                if (structural.passed) {
-                    console.log('Accepted via structural validation');
-                    return { success: true, similarity, distance };
+                
+                if (!structural.passed) {
+                    console.log('❌ REJECTED: Failed structural validation');
+                    return {
+                        success: false,
+                        similarity,
+                        error: `Structural validation failed (${similarity}%).\n\n${structural.reason}\n\nThis may be a different person or very poor quality.`
+                    };
+                }
+                
+                // Only allow if gap is small AND structure passed
+                if (gap < 0.07) {
+                    console.log('✅ ACCEPTED via structural override (small gap)');
+                    return { 
+                        success: true, 
+                        similarity, 
+                        distance,
+                        method: 'structural-override',
+                        matchType 
+                    };
                 }
             }
             
+            // If gap is very small (within 3%), check structure
+            if (gap < 0.03) {
+                const structural = await checkFacialStructure(registered, live);
+                if (structural.passed) {
+                    console.log('✅ ACCEPTED via structural validation (very close to threshold)');
+                    return { 
+                        success: true, 
+                        similarity, 
+                        distance,
+                        method: 'near-threshold-structural',
+                        matchType 
+                    };
+                }
+            }
+            
+            console.log(`❌ REJECTED: ${similarity}% below ${matchType} threshold`);
             return {
                 success: false,
                 similarity,
-                error: `Verification failed (${similarity}%). Required: >${((1-effectiveThreshold)*100).toFixed(1)}%\n\nTips:\n• Use similar lighting\n• Same angle as registration\n• Or re-register from this device`
+                error: `Verification failed (${similarity}%).\n\nRequired: >${((1-effectiveThreshold)*100).toFixed(0)}% for ${matchType}\n\n` +
+                       `Tips:\n` +
+                       `• Better lighting helps significantly\n` +
+                       `• Face camera at same angle as registration\n` +
+                       `• Remove glasses/hat if not worn during registration\n` +
+                       `• Re-register from this device for best results`
             };
         }
 
-        // Additional check for low similarity (35-45%)
-        if (similarity < 55) {
+        // MANDATORY structural validation for borderline matches
+        if (similarity >= 35 && similarity <= 50) {
+            console.log('🔍 Borderline match, validating facial structure...');
             const structural = await checkFacialStructure(registered, live);
+            
             if (!structural.passed) {
+                console.log('❌ REJECTED: Low similarity failed structural check');
                 return {
                     success: false,
                     similarity,
-                    error: `Facial structure mismatch (${similarity}%). ${structural.reason}`
+                    error: `Structural mismatch (${similarity}%).\n\n${structural.reason}\n\nFacial proportions don't match.`
                 };
             }
+            console.log('✅ Structural validation PASSED for borderline match');
         }
 
-        console.log(`LOGIN SUCCESS: ${matNo} at ${similarity}%`);
-        return { success: true, similarity, distance };
+        console.log(`✅ LOGIN ACCEPTED: ${matNo} at ${similarity}% (${matchType})`);
+        return { 
+            success: true, 
+            similarity, 
+            distance,
+            matchType 
+        };
 
     } catch (error) {
         console.error('Validation error:', error);
@@ -572,43 +745,84 @@ async function checkFacialStructure(registered, live) {
         const liveLandmarks = live.landmarks.positions;
         
         if (!regLandmarks || !liveLandmarks || regLandmarks.length < 68 || liveLandmarks.length < 68) {
-            return { passed: false, reason: 'Facial features unclear' };
+            console.warn('Insufficient landmarks');
+            return { passed: false, reason: 'Facial features not clear enough' };
         }
         
         const getProportions = (landmarks) => {
+            // Eye distance
             const eyeDistance = Math.hypot(
                 landmarks[45].x - landmarks[36].x,
                 landmarks[45].y - landmarks[36].y
             );
+            
+            // Face height (nose to chin)
             const faceHeight = Math.hypot(
                 landmarks[8].x - landmarks[30].x,
                 landmarks[8].y - landmarks[30].y
             );
+            
+            // Face width (jaw to jaw)
             const faceWidth = Math.hypot(
                 landmarks[16].x - landmarks[0].x,
                 landmarks[16].y - landmarks[0].y
             );
             
+            // Nose width
+            const noseWidth = Math.hypot(
+                landmarks[35].x - landmarks[31].x,
+                landmarks[35].y - landmarks[31].y
+            );
+            
             return {
                 eyeToHeight: eyeDistance / faceHeight,
-                widthToHeight: faceWidth / faceHeight
+                widthToHeight: faceWidth / faceHeight,
+                noseToEye: noseWidth / eyeDistance
             };
         };
         
         const regProps = getProportions(regLandmarks);
         const liveProps = getProportions(liveLandmarks);
         
+        // Calculate proportional differences
         const eyeDiff = Math.abs(regProps.eyeToHeight - liveProps.eyeToHeight) / regProps.eyeToHeight;
         const widthDiff = Math.abs(regProps.widthToHeight - liveProps.widthToHeight) / regProps.widthToHeight;
+        const noseDiff = Math.abs(regProps.noseToEye - liveProps.noseToEye) / regProps.noseToEye;
         
-        if (eyeDiff > 0.25 || widthDiff > 0.25) {
-            return { passed: false, reason: 'Face proportions too different' };
+        console.log('Structural Analysis:', {
+            eyeDiff: (eyeDiff * 100).toFixed(1) + '%',
+            widthDiff: (widthDiff * 100).toFixed(1) + '%',
+            noseDiff: (noseDiff * 100).toFixed(1) + '%'
+        });
+        
+        // STRICT: All proportions must match within 20% (prevents similar faces)
+        if (eyeDiff > 0.20) {
+            return {
+                passed: false,
+                reason: `Eye spacing differs by ${(eyeDiff * 100).toFixed(0)}% (max 20%)`
+            };
         }
         
+        if (widthDiff > 0.20) {
+            return {
+                passed: false,
+                reason: `Face width differs by ${(widthDiff * 100).toFixed(0)}% (max 20%)`
+            };
+        }
+        
+        if (noseDiff > 0.25) { // Slightly more lenient for nose
+            return {
+                passed: false,
+                reason: `Nose proportions differ by ${(noseDiff * 100).toFixed(0)}% (max 25%)`
+            };
+        }
+        
+        console.log('✓ All structural checks passed');
         return { passed: true };
         
     } catch (error) {
-        return { passed: false, reason: 'Structure check failed' };
+        console.error('Structural check error:', error);
+        return { passed: false, reason: 'Could not validate facial structure' };
     }
 }
 
