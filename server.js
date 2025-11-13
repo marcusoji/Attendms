@@ -1959,7 +1959,218 @@ app.get('/api/admin/export/full-backup', verifyToken, verifyAdmin, asyncHandler(
         res.status(500).json({ message: 'Failed to create full backup' });
     }
 }));
+// ============================================
+// ADMIN-SPECIFIC EXPORT ROUTES
+// Add these to your server.js (with other admin routes)
+// These allow admin to export course and session data
+// ============================================
 
+// --- EXPORT: Course Attendance (Admin Access) ---
+app.get('/api/admin/export/course-attendance/:courseId', verifyToken, verifyAdmin, asyncHandler(async (req, res) => {
+    try {
+        const { courseId } = req.params;
+        
+        log('info', 'Admin exporting course attendance', { 
+            adminId: req.user.id, 
+            courseId 
+        });
+        
+        const [records] = await db.query(`
+            SELECT 
+                ar.id,
+                s.name as student_name, 
+                s.mat_no,
+                ar.marked_at,
+                DATE(ar.marked_at) as attendance_date,
+                TIME(ar.marked_at) as attendance_time,
+                c.course_code,
+                c.course_title
+            FROM attendance_records ar 
+            JOIN students s ON ar.student_id = s.id 
+            JOIN courses c ON ar.course_id = c.id
+            WHERE ar.course_id = ?
+            ORDER BY ar.marked_at DESC
+        `, [courseId]);
+        
+        log('info', 'Course attendance exported', { 
+            adminId: req.user.id, 
+            courseId, 
+            recordCount: records.length 
+        });
+        
+        res.json(records);
+        
+    } catch (error) {
+        log('error', 'Course attendance export error', error);
+        res.status(500).json({ message: 'Failed to export course attendance' });
+    }
+}));
+
+// --- EXPORT: Session Attendance (Admin Access) ---
+app.get('/api/admin/export/session-attendance/:courseId/:date', verifyToken, verifyAdmin, asyncHandler(async (req, res) => {
+    try {
+        const { courseId, date } = req.params;
+        
+        log('info', 'Admin exporting session attendance', { 
+            adminId: req.user.id, 
+            courseId, 
+            date 
+        });
+        
+        const [records] = await db.query(`
+            SELECT 
+                ar.id,
+                s.name as student_name, 
+                s.mat_no,
+                TIME(ar.marked_at) as attendance_time,
+                c.course_code,
+                c.course_title,
+                ar.marked_at
+            FROM attendance_records ar 
+            JOIN students s ON ar.student_id = s.id 
+            JOIN courses c ON ar.course_id = c.id
+            WHERE ar.course_id = ? AND DATE(ar.marked_at) = ?
+            ORDER BY ar.marked_at ASC
+        `, [courseId, date]);
+        
+        log('info', 'Session attendance exported', { 
+            adminId: req.user.id, 
+            courseId, 
+            date, 
+            recordCount: records.length 
+        });
+        
+        res.json(records);
+        
+    } catch (error) {
+        log('error', 'Session attendance export error', error);
+        res.status(500).json({ message: 'Failed to export session attendance' });
+    }
+}));
+
+// --- EXPORT: All Courses with Full Details (Admin Access) ---
+app.get('/api/admin/export/courses-detailed', verifyToken, verifyAdmin, asyncHandler(async (req, res) => {
+    try {
+        log('info', 'Admin exporting detailed courses', { adminId: req.user.id });
+        
+        const [courses] = await db.query(`
+            SELECT 
+                c.id,
+                c.course_code,
+                c.course_title,
+                c.created_at,
+                l.name as lecturer_name,
+                l.lecturer_id,
+                l.email as lecturer_email,
+                COUNT(DISTINCT ar.student_id) as unique_students,
+                COUNT(ar.id) as attendance_count,
+                COUNT(DISTINCT DATE(ar.marked_at)) as total_sessions,
+                MIN(DATE(ar.marked_at)) as first_session,
+                MAX(DATE(ar.marked_at)) as last_session
+            FROM courses c
+            JOIN lecturers l ON c.lecturer_id = l.id
+            LEFT JOIN attendance_records ar ON c.id = ar.course_id
+            GROUP BY c.id, c.course_code, c.course_title, c.created_at, l.name, l.lecturer_id, l.email
+            ORDER BY c.course_code ASC
+        `);
+        
+        log('info', 'Detailed courses exported', { 
+            adminId: req.user.id, 
+            courseCount: courses.length 
+        });
+        
+        res.json(courses);
+        
+    } catch (error) {
+        log('error', 'Detailed courses export error', error);
+        res.status(500).json({ message: 'Failed to export detailed courses' });
+    }
+}));
+
+// --- EXPORT: Student Attendance by Course (Admin Access) ---
+app.get('/api/admin/export/student-course-attendance/:studentId', verifyToken, verifyAdmin, asyncHandler(async (req, res) => {
+    try {
+        const { studentId } = req.params;
+        
+        log('info', 'Admin exporting student course attendance', { 
+            adminId: req.user.id, 
+            studentId 
+        });
+        
+        const [records] = await db.query(`
+            SELECT 
+                s.name as student_name,
+                s.mat_no,
+                c.course_code,
+                c.course_title,
+                l.name as lecturer_name,
+                COUNT(ar.id) as attendance_count,
+                COUNT(DISTINCT DATE(ar.marked_at)) as days_attended,
+                MIN(ar.marked_at) as first_attendance,
+                MAX(ar.marked_at) as last_attendance
+            FROM attendance_records ar
+            JOIN students s ON ar.student_id = s.id
+            JOIN courses c ON ar.course_id = c.id
+            JOIN lecturers l ON c.lecturer_id = l.id
+            WHERE ar.student_id = ?
+            GROUP BY s.id, s.name, s.mat_no, c.id, c.course_code, c.course_title, l.name
+            ORDER BY c.course_code ASC
+        `, [studentId]);
+        
+        log('info', 'Student course attendance exported', { 
+            adminId: req.user.id, 
+            studentId, 
+            recordCount: records.length 
+        });
+        
+        res.json(records);
+        
+    } catch (error) {
+        log('error', 'Student course attendance export error', error);
+        res.status(500).json({ message: 'Failed to export student course attendance' });
+    }
+}));
+
+// --- EXPORT: Attendance by Lecturer (Admin Access) ---
+app.get('/api/admin/export/lecturer-attendance/:lecturerId', verifyToken, verifyAdmin, asyncHandler(async (req, res) => {
+    try {
+        const { lecturerId } = req.params;
+        
+        log('info', 'Admin exporting lecturer attendance', { 
+            adminId: req.user.id, 
+            lecturerId 
+        });
+        
+        const [records] = await db.query(`
+            SELECT 
+                ar.id,
+                s.name as student_name,
+                s.mat_no,
+                c.course_code,
+                c.course_title,
+                ar.marked_at,
+                DATE(ar.marked_at) as attendance_date,
+                TIME(ar.marked_at) as attendance_time
+            FROM attendance_records ar
+            JOIN students s ON ar.student_id = s.id
+            JOIN courses c ON ar.course_id = c.id
+            WHERE c.lecturer_id = ?
+            ORDER BY ar.marked_at DESC
+        `, [lecturerId]);
+        
+        log('info', 'Lecturer attendance exported', { 
+            adminId: req.user.id, 
+            lecturerId, 
+            recordCount: records.length 
+        });
+        
+        res.json(records);
+        
+    } catch (error) {
+        log('error', 'Lecturer attendance export error', error);
+        res.status(500).json({ message: 'Failed to export lecturer attendance' });
+    }
+}));
 // Handle 404
 app.use((req, res) => {
     log('warn', '404 - Route not found', { url: req.url, method: req.method });

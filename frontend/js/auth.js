@@ -1175,6 +1175,7 @@ document.getElementById('courseSelectForReport').addEventListener('change', asyn
     }
 });
 
+// --- UPDATED: Load Session Details with Export Button ---
 async function loadSessionDetails(courseId, date) {
     const detailsContainer = document.getElementById('attendanceDetailsContainer');
     
@@ -1223,6 +1224,9 @@ async function loadSessionDetails(courseId, date) {
                 </table>
                 
                 <div class="session-actions" style="margin-top: 20px;">
+                    <button class="secondary-btn" onclick="exportSessionAttendance('${courseId}', '${date}', '${courseInfo.course_code}', '${sessionDate}')" style="background: var(--success-color); color: white;">
+                        📥 Export Session CSV
+                    </button>
                     <button class="secondary-btn" onclick="printSessionReport('${courseId}', '${date}', '${courseInfo.course_code}', '${sessionDate}')">
                         🖨️ Print
                     </button>
@@ -1236,7 +1240,6 @@ async function loadSessionDetails(courseId, date) {
         detailsContainer.innerHTML = `<div class="error-display">Error: ${error.message}</div>`;
     }
 }
-
 async function printSessionReport(courseId, date, courseCode, formattedDate) {
     try {
         const records = await apiFetch(`/attendance/${courseId}/date/${date}`, {
@@ -1562,6 +1565,7 @@ function filterStudents() {
     displayStudents(filtered);
 }
 
+// --- UPDATED: View Student with Export Button ---
 async function viewStudent(studentId) {
     try {
         const data = await apiFetch(`/admin/students/${studentId}`, {
@@ -1618,10 +1622,12 @@ async function viewStudent(studentId) {
                     ` : '<p>No attendance records yet</p>'}
                     
                     <div class="modal-actions">
+                        ${attendance.length > 0 ? `
+                            <button class="secondary-btn" onclick="exportStudentAttendanceHistory(${student.id}, '${student.name}')" style="background: var(--success-color); color: white;">
+                                📥 Export Attendance History
+                            </button>
+                        ` : ''}
                         <button class="secondary-btn" onclick="closeModal('studentModal')">Close</button>
-                        <button class="secondary-btn" onclick="exportStudentAttendanceHistory(${student.id}, '${student.name}')">
-    📥 Export Attendance History
-</button>
                     </div>
                 </div>
             </div>
@@ -1633,6 +1639,7 @@ async function viewStudent(studentId) {
         alert(`Failed to load student details: ${error.message}`);
     }
 }
+
 
 function confirmDeleteStudent(studentId, studentName) {
     showDeleteModal(
@@ -1742,6 +1749,7 @@ function filterLecturers() {
     displayLecturers(filtered);
 }
 
+// --- UPDATED: View Lecturer with Export Button ---
 async function viewLecturer(lecturerId) {
     try {
         const data = await apiFetch(`/admin/lecturers/${lecturerId}`, {
@@ -1796,6 +1804,11 @@ async function viewLecturer(lecturerId) {
                     ` : '<p>No courses created yet</p>'}
                     
                     <div class="modal-actions">
+                        ${courses.length > 0 ? `
+                            <button class="secondary-btn" onclick="exportLecturerAttendance(${lecturer.id}, '${lecturer.name}')" style="background: var(--success-color); color: white;">
+                                📥 Export All Attendance
+                            </button>
+                        ` : ''}
                         <button class="secondary-btn" onclick="closeModal('lecturerModal')">Close</button>
                     </div>
                 </div>
@@ -1809,6 +1822,32 @@ async function viewLecturer(lecturerId) {
     }
 }
 
+// --- NEW: Export Lecturer Attendance Function ---
+async function exportLecturerAttendance(lecturerId, lecturerName) {
+    try {
+        const records = await apiFetch(`/admin/export/lecturer-attendance/${lecturerId}`, {
+            headers: { 'Authorization': `Bearer ${currentUser.token}` }
+        });
+        
+        if (records.length === 0) {
+            alert('No attendance records to export');
+            return;
+        }
+        
+        const headers = ['student_name', 'mat_no', 'course_code', 'course_title', 'attendance_date', 'attendance_time'];
+        const csvContent = convertToCSV(records, headers);
+        
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+        const filename = `${lecturerName.replace(/\s+/g, '_')}_all_attendance_${timestamp}.csv`;
+        
+        downloadCSV(csvContent, filename);
+        alert('Lecturer attendance exported successfully!');
+        
+    } catch (error) {
+        console.error('Export error:', error);
+        alert(`Export failed: ${error.message}`);
+    }
+}
 function confirmDeleteLecturer(lecturerId, lecturerName) {
     showDeleteModal(
         `Are you sure you want to delete lecturer "${lecturerName}"? This will also delete all their courses and attendance records.`,
@@ -1974,10 +2013,10 @@ async function viewCourse(courseId) {
                     ` : '<p>No sessions recorded yet</p>'}
                     
                     <div class="modal-actions">
+                        <button class="secondary-btn" onclick="exportCourseAttendance(${course.id}, '${course.course_code}')" style="background: var(--success-color); color: white;">
+                            📥 Export All Attendance
+                        </button>
                         <button class="secondary-btn" onclick="closeModal('courseModal')">Close</button>
-                        <button class="secondary-btn" onclick="exportCourseAttendance(${course.id}, '${course.course_code}')">
-    📥 Export Course Attendance
-</button>
                     </div>
                 </div>
             </div>
@@ -2941,9 +2980,16 @@ async function exportSummaryReportCSV(timestamp) {
 }
 
 // --- EXPORT INDIVIDUAL COURSE ---
+// ============================================
+// FIXED EXPORT FUNCTIONS WITH ADMIN ACCESS
+// Replace these functions in your auth.js
+// ============================================
+
+// --- EXPORT INDIVIDUAL COURSE (FIXED FOR ADMIN) ---
 async function exportCourseAttendance(courseId, courseName) {
     try {
-        const records = await apiFetch(`/attendance/${courseId}`, {
+        // Use the admin endpoint instead of the lecturer endpoint
+        const records = await apiFetch(`/admin/export/course-attendance/${courseId}`, {
             headers: { 'Authorization': `Bearer ${currentUser.token}` }
         });
         
@@ -2962,11 +3008,12 @@ async function exportCourseAttendance(courseId, courseName) {
         alert('Export successful!');
         
     } catch (error) {
+        console.error('Export error:', error);
         alert(`Export failed: ${error.message}`);
     }
 }
 
-// --- EXPORT STUDENT ATTENDANCE HISTORY ---
+// --- EXPORT STUDENT ATTENDANCE HISTORY (ALREADY CORRECT - ADMIN ENDPOINT) ---
 async function exportStudentAttendanceHistory(studentId, studentName) {
     try {
         const data = await apiFetch(`/admin/students/${studentId}`, {
@@ -2991,6 +3038,34 @@ async function exportStudentAttendanceHistory(studentId, studentName) {
         alert(`Export failed: ${error.message}`);
     }
 }
+
+// --- ADD EXPORT SESSION ATTENDANCE (NEW FUNCTION) ---
+async function exportSessionAttendance(courseId, date, courseName, formattedDate) {
+    try {
+        const records = await apiFetch(`/admin/export/session-attendance/${courseId}/${date}`, {
+            headers: { 'Authorization': `Bearer ${currentUser.token}` }
+        });
+        
+        if (records.length === 0) {
+            alert('No attendance records for this session');
+            return;
+        }
+        
+        const headers = ['student_name', 'mat_no', 'attendance_time', 'course_code', 'course_title'];
+        const csvContent = convertToCSV(records, headers);
+        
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+        const filename = `${courseName.replace(/\s+/g, '_')}_${formattedDate}_attendance_${timestamp}.csv`;
+        
+        downloadCSV(csvContent, filename);
+        alert('Session attendance exported successfully!');
+        
+    } catch (error) {
+        console.error('Export error:', error);
+        alert(`Export failed: ${error.message}`);
+    }
+}
+
 
 
 // ============================================
