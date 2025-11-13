@@ -531,7 +531,7 @@ app.post('/api/login', asyncHandler(async (req, res) => {
 
 // Create course route
 app.post('/api/courses', verifyToken, asyncHandler(async (req, res) => {
-    if (req.user.type !== 'lecturer') {
+    if (req.user.type !== 'lecturer' && req.user.type !== 'admin' ) {
         log('warn', 'Course creation denied: Not a lecturer', { userId: req.user.id, userType: req.user.type });
         return res.status(403).json({ message: 'Access denied: Lecturers only' });
     }
@@ -1010,7 +1010,7 @@ app.post('/api/mark-attendance', verifyToken, asyncHandler(async (req, res) => {
 
 // Add this new route to get attendance records grouped by date/session
 app.get('/api/attendance/:courseId/sessions', verifyToken, asyncHandler(async (req, res) => {
-    if (req.user.type !== 'lecturer') {
+    if (req.user.type !== 'lecturer' && req.user.type !== 'admin') {
         log('warn', 'Attendance sessions access denied: Not a lecturer', { userId: req.user.id, userType: req.user.type });
         return res.status(403).json({ message: 'Access denied: Lecturers only' });
     }
@@ -1066,7 +1066,7 @@ app.get('/api/attendance/:courseId/sessions', verifyToken, asyncHandler(async (r
 
 // Enhanced route to get attendance records for a specific date/session
 app.get('/api/attendance/:courseId/date/:date', verifyToken, asyncHandler(async (req, res) => {
-    if (req.user.type !== 'lecturer') {
+    if (req.user.type !== 'lecturer' && req.user.type !== 'admin') {
         log('warn', 'Attendance records by date access denied: Not a lecturer', { userId: req.user.id, userType: req.user.type });
         return res.status(403).json({ message: 'Access denied: Lecturers only' });
     }
@@ -1127,7 +1127,7 @@ app.get('/api/attendance/:courseId/date/:date', verifyToken, asyncHandler(async 
 
 // Enhanced route to get comprehensive course statistics
 app.get('/api/courses/:courseId/stats', verifyToken, asyncHandler(async (req, res) => {
-    if (req.user.type !== 'lecturer') {
+    if (req.user.type !== 'lecturer' && req.user.type !== 'admin') {
         log('warn', 'Course stats access denied: Not a lecturer', { userId: req.user.id, userType: req.user.type });
         return res.status(403).json({ message: 'Access denied: Lecturers only' });
     }
