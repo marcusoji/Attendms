@@ -1419,6 +1419,1579 @@ async function printCourseReport() {
         alert(`Print failed: ${error.message}`);
     }
 }
+// ============================================
+// ADMIN DASHBOARD FUNCTIONS
+// Add these to your auth.js file
+// ============================================
+
+let allStudents = [];
+let allLecturers = [];
+let allCourses = [];
+
+// --- TAB SWITCHING ---
+
+function switchAdminTab(tabName) {
+    // Hide all tabs
+    document.querySelectorAll('.admin-tab-content').forEach(tab => {
+        tab.classList.remove('active');
+    });
+    
+    // Remove active class from all buttons
+    document.querySelectorAll('.admin-tab-btn').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    
+    // Show selected tab
+    document.getElementById(`${tabName}Tab`).classList.add('active');
+    
+    // Add active class to clicked button
+    event.target.classList.add('active');
+    
+    // Load data for the tab
+    if (tabName === 'students') {
+        loadStudentsData();
+    } else if (tabName === 'lecturers') {
+        loadLecturersData();
+    } else if (tabName === 'courses') {
+        loadCoursesData();
+    } else if (tabName === 'system') {
+        loadSystemHealth();
+    }
+}
+
+// --- LOAD ADMIN DASHBOARD ---
+
+async function loadAdminDashboard() {
+    try {
+        // Load overview statistics
+        const stats = await apiFetch('/admin/stats', {
+            headers: { 'Authorization': `Bearer ${currentUser.token}` }
+        });
+        
+        document.getElementById('totalStudents').textContent = stats.students;
+        document.getElementById('totalLecturers').textContent = stats.lecturers;
+        document.getElementById('totalCourses').textContent = stats.courses;
+        document.getElementById('totalAttendance').textContent = stats.attendance;
+        
+        // Load initial tab data
+        loadStudentsData();
+        
+    } catch (error) {
+        console.error('Failed to load admin dashboard:', error);
+        alert('Failed to load dashboard data');
+    }
+}
+
+// --- STUDENTS MANAGEMENT ---
+
+async function loadStudentsData() {
+    const container = document.getElementById('studentsListContainer');
+    container.innerHTML = '<div class="loading">Loading students...</div>';
+    
+    try {
+        const students = await apiFetch('/admin/students', {
+            headers: { 'Authorization': `Bearer ${currentUser.token}` }
+        });
+        
+        allStudents = students;
+        displayStudents(students);
+        
+    } catch (error) {
+        container.innerHTML = `<div class="error-display">Error: ${error.message}</div>`;
+    }
+}
+
+function displayStudents(students) {
+    const container = document.getElementById('studentsListContainer');
+    
+    if (students.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <div class="empty-state-icon">👥</div>
+                <h3>No Students Found</h3>
+                <p>No students registered in the system</p>
+            </div>
+        `;
+        return;
+    }
+    
+    const tableHTML = `
+        <table class="admin-data-table">
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Mat No.</th>
+                    <th>Name</th>
+                    <th>Email</th>
+                    <th>Phone</th>
+                    <th>Attendance</th>
+                    <th>Registered</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${students.map((student, index) => `
+                    <tr>
+                        <td>${index + 1}</td>
+                        <td><strong>${student.mat_no}</strong></td>
+                        <td>${student.name}</td>
+                        <td>${student.email}</td>
+                        <td>${student.phone || 'N/A'}</td>
+                        <td>${student.attendance_count} records</td>
+                        <td>${new Date(student.created_at).toLocaleDateString()}</td>
+                        <td>
+                            <button class="action-btn view-btn" onclick="viewStudent(${student.id})">View</button>
+                            <button class="action-btn delete-btn" onclick="confirmDeleteStudent(${student.id}, '${student.name}')">Delete</button>
+                        </td>
+                    </tr>
+                `).join('')}
+            </tbody>
+        </table>
+    `;
+    
+    container.innerHTML = tableHTML;
+}
+
+function filterStudents() {
+    const searchTerm = document.getElementById('studentSearch').value.toLowerCase();
+    const filtered = allStudents.filter(student => 
+        student.name.toLowerCase().includes(searchTerm) ||
+        student.mat_no.toLowerCase().includes(searchTerm) ||
+        student.email.toLowerCase().includes(searchTerm)
+    );
+    displayStudents(filtered);
+}
+
+async function viewStudent(studentId) {
+    try {
+        const data = await apiFetch(`/admin/students/${studentId}`, {
+            headers: { 'Authorization': `Bearer ${currentUser.token}` }
+        });
+        
+        const student = data.student;
+        const attendance = data.recentAttendance;
+        
+        const modalHTML = `
+            <div class="modal active" id="studentModal">
+                <div class="modal-content" style="max-width: 700px;">
+                    <h3>📋 Student Details</h3>
+                    
+                    <div class="stats-display">
+                        <div class="stat-box">
+                            <strong>Total Attendance</strong>
+                            <span>${student.total_attendance}</span>
+                        </div>
+                        <div class="stat-box">
+                            <strong>Courses Attended</strong>
+                            <span>${student.courses_attended}</span>
+                        </div>
+                    </div>
+                    
+                    <div style="margin: 20px 0;">
+                        <p><strong>Mat No:</strong> ${student.mat_no}</p>
+                        <p><strong>Name:</strong> ${student.name}</p>
+                        <p><strong>Email:</strong> ${student.email}</p>
+                        <p><strong>Phone:</strong> ${student.phone || 'N/A'}</p>
+                        <p><strong>Registered:</strong> ${new Date(student.created_at).toLocaleString()}</p>
+                    </div>
+                    
+                    <h4>Recent Attendance</h4>
+                    ${attendance.length > 0 ? `
+                        <table class="admin-data-table" style="margin-top: 15px;">
+                            <thead>
+                                <tr>
+                                    <th>Date</th>
+                                    <th>Course</th>
+                                    <th>Time</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${attendance.map(record => `
+                                    <tr>
+                                        <td>${new Date(record.marked_at).toLocaleDateString()}</td>
+                                        <td>${record.course_code} - ${record.course_title}</td>
+                                        <td>${new Date(record.marked_at).toLocaleTimeString()}</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    ` : '<p>No attendance records yet</p>'}
+                    
+                    <div class="modal-actions">
+                        <button class="secondary-btn" onclick="closeModal('studentModal')">Close</button>
+                        <button class="secondary-btn" onclick="exportStudentAttendanceHistory(${student.id}, '${student.name}')">
+    📥 Export Attendance History
+</button>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        document.body.insertAdjacentHTML('beforeend', modalHTML);
+        
+    } catch (error) {
+        alert(`Failed to load student details: ${error.message}`);
+    }
+}
+
+function confirmDeleteStudent(studentId, studentName) {
+    showDeleteModal(
+        `Are you sure you want to delete student "${studentName}"? This will also delete all their attendance records.`,
+        () => deleteStudent(studentId)
+    );
+}
+
+async function deleteStudent(studentId) {
+    try {
+        await apiFetch(`/admin/students/${studentId}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${currentUser.token}` }
+        });
+        
+        closeDeleteModal();
+        loadStudentsData();
+        loadAdminDashboard(); // Refresh stats
+        alert('Student deleted successfully');
+        
+    } catch (error) {
+        alert(`Failed to delete student: ${error.message}`);
+    }
+}
+
+function refreshStudentsList() {
+    loadStudentsData();
+}
+
+// --- LECTURERS MANAGEMENT ---
+
+async function loadLecturersData() {
+    const container = document.getElementById('lecturersListContainer');
+    container.innerHTML = '<div class="loading">Loading lecturers...</div>';
+    
+    try {
+        const lecturers = await apiFetch('/admin/lecturers', {
+            headers: { 'Authorization': `Bearer ${currentUser.token}` }
+        });
+        
+        allLecturers = lecturers;
+        displayLecturers(lecturers);
+        
+    } catch (error) {
+        container.innerHTML = `<div class="error-display">Error: ${error.message}</div>`;
+    }
+}
+
+function displayLecturers(lecturers) {
+    const container = document.getElementById('lecturersListContainer');
+    
+    if (lecturers.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <div class="empty-state-icon">👨‍🏫</div>
+                <h3>No Lecturers Found</h3>
+                <p>No lecturers registered in the system</p>
+            </div>
+        `;
+        return;
+    }
+    
+    const tableHTML = `
+        <table class="admin-data-table">
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Lecturer ID</th>
+                    <th>Name</th>
+                    <th>Email</th>
+                    <th>Phone</th>
+                    <th>Courses</th>
+                    <th>Registered</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${lecturers.map((lecturer, index) => `
+                    <tr>
+                        <td>${index + 1}</td>
+                        <td><strong>${lecturer.lecturer_id}</strong></td>
+                        <td>${lecturer.name}</td>
+                        <td>${lecturer.email}</td>
+                        <td>${lecturer.phone || 'N/A'}</td>
+                        <td>${lecturer.course_count} courses</td>
+                        <td>${new Date(lecturer.created_at).toLocaleDateString()}</td>
+                        <td>
+                            <button class="action-btn view-btn" onclick="viewLecturer(${lecturer.id})">View</button>
+                            <button class="action-btn delete-btn" onclick="confirmDeleteLecturer(${lecturer.id}, '${lecturer.name}')">Delete</button>
+                        </td>
+                    </tr>
+                `).join('')}
+            </tbody>
+        </table>
+    `;
+    
+    container.innerHTML = tableHTML;
+}
+
+function filterLecturers() {
+    const searchTerm = document.getElementById('lecturerSearch').value.toLowerCase();
+    const filtered = allLecturers.filter(lecturer => 
+        lecturer.name.toLowerCase().includes(searchTerm) ||
+        lecturer.lecturer_id.toLowerCase().includes(searchTerm) ||
+        lecturer.email.toLowerCase().includes(searchTerm)
+    );
+    displayLecturers(filtered);
+}
+
+async function viewLecturer(lecturerId) {
+    try {
+        const data = await apiFetch(`/admin/lecturers/${lecturerId}`, {
+            headers: { 'Authorization': `Bearer ${currentUser.token}` }
+        });
+        
+        const lecturer = data.lecturer;
+        const courses = data.courses;
+        
+        const modalHTML = `
+            <div class="modal active" id="lecturerModal">
+                <div class="modal-content" style="max-width: 700px;">
+                    <h3>📋 Lecturer Details</h3>
+                    
+                    <div class="stats-display">
+                        <div class="stat-box">
+                            <strong>Total Courses</strong>
+                            <span>${lecturer.total_courses}</span>
+                        </div>
+                    </div>
+                    
+                    <div style="margin: 20px 0;">
+                        <p><strong>Lecturer ID:</strong> ${lecturer.lecturer_id}</p>
+                        <p><strong>Name:</strong> ${lecturer.name}</p>
+                        <p><strong>Email:</strong> ${lecturer.email}</p>
+                        <p><strong>Phone:</strong> ${lecturer.phone || 'N/A'}</p>
+                        <p><strong>Registered:</strong> ${new Date(lecturer.created_at).toLocaleString()}</p>
+                    </div>
+                    
+                    <h4>Courses</h4>
+                    ${courses.length > 0 ? `
+                        <table class="admin-data-table" style="margin-top: 15px;">
+                            <thead>
+                                <tr>
+                                    <th>Course Code</th>
+                                    <th>Title</th>
+                                    <th>Attendance</th>
+                                    <th>Created</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${courses.map(course => `
+                                    <tr>
+                                        <td><strong>${course.course_code}</strong></td>
+                                        <td>${course.course_title}</td>
+                                        <td>${course.attendance_count} records</td>
+                                        <td>${new Date(course.created_at).toLocaleDateString()}</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    ` : '<p>No courses created yet</p>'}
+                    
+                    <div class="modal-actions">
+                        <button class="secondary-btn" onclick="closeModal('lecturerModal')">Close</button>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        document.body.insertAdjacentHTML('beforeend', modalHTML);
+        
+    } catch (error) {
+        alert(`Failed to load lecturer details: ${error.message}`);
+    }
+}
+
+function confirmDeleteLecturer(lecturerId, lecturerName) {
+    showDeleteModal(
+        `Are you sure you want to delete lecturer "${lecturerName}"? This will also delete all their courses and attendance records.`,
+        () => deleteLecturer(lecturerId)
+    );
+}
+
+async function deleteLecturer(lecturerId) {
+    try {
+        await apiFetch(`/admin/lecturers/${lecturerId}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${currentUser.token}` }
+        });
+        
+        closeDeleteModal();
+        loadLecturersData();
+        loadAdminDashboard(); // Refresh stats
+        alert('Lecturer deleted successfully');
+        
+    } catch (error) {
+        alert(`Failed to delete lecturer: ${error.message}`);
+    }
+}
+
+function refreshLecturersList() {
+    loadLecturersData();
+}
+
+// --- COURSES MANAGEMENT ---
+
+async function loadCoursesData() {
+    const container = document.getElementById('coursesListContainer');
+    container.innerHTML = '<div class="loading">Loading courses...</div>';
+    
+    try {
+        const courses = await apiFetch('/admin/courses', {
+            headers: { 'Authorization': `Bearer ${currentUser.token}` }
+        });
+        
+        allCourses = courses;
+        displayCourses(courses);
+        
+    } catch (error) {
+        container.innerHTML = `<div class="error-display">Error: ${error.message}</div>`;
+    }
+}
+
+function displayCourses(courses) {
+    const container = document.getElementById('coursesListContainer');
+    
+    if (courses.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <div class="empty-state-icon">📚</div>
+                <h3>No Courses Found</h3>
+                <p>No courses created in the system</p>
+            </div>
+        `;
+        return;
+    }
+    
+    const tableHTML = `
+        <table class="admin-data-table">
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Course Code</th>
+                    <th>Title</th>
+                    <th>Lecturer</th>
+                    <th>Students</th>
+                    <th>Attendance</th>
+                    <th>Created</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${courses.map((course, index) => `
+                    <tr>
+                        <td>${index + 1}</td>
+                        <td><strong>${course.course_code}</strong></td>
+                        <td>${course.course_title}</td>
+                        <td>${course.lecturer_name}</td>
+                        <td>${course.unique_students} students</td>
+                        <td>${course.attendance_count} records</td>
+                        <td>${new Date(course.created_at).toLocaleDateString()}</td>
+                        <td>
+                            <button class="action-btn view-btn" onclick="viewCourse(${course.id})">View</button>
+                            <button class="action-btn delete-btn" onclick="confirmDeleteCourse(${course.id}, '${course.course_code}')">Delete</button>
+                        </td>
+                    </tr>
+                `).join('')}
+            </tbody>
+        </table>
+    `;
+    
+    container.innerHTML = tableHTML;
+}
+
+function filterCourses() {
+    const searchTerm = document.getElementById('courseSearch').value.toLowerCase();
+    const filtered = allCourses.filter(course => 
+        course.course_code.toLowerCase().includes(searchTerm) ||
+        course.course_title.toLowerCase().includes(searchTerm) ||
+        course.lecturer_name.toLowerCase().includes(searchTerm)
+    );
+    displayCourses(filtered);
+}
+
+async function viewCourse(courseId) {
+    try {
+        const data = await apiFetch(`/admin/courses/${courseId}`, {
+            headers: { 'Authorization': `Bearer ${currentUser.token}` }
+        });
+        
+        const course = data.course;
+        const sessions = data.recentSessions;
+        
+        const modalHTML = `
+            <div class="modal active" id="courseModal">
+                <div class="modal-content" style="max-width: 700px;">
+                    <h3>📋 Course Details</h3>
+                    
+                    <div class="stats-display">
+                        <div class="stat-box">
+                            <strong>Total Students</strong>
+                            <span>${course.unique_students}</span>
+                        </div>
+                        <div class="stat-box">
+                            <strong>Total Sessions</strong>
+                            <span>${course.total_sessions}</span>
+                        </div>
+                        <div class="stat-box">
+                            <strong>Total Records</strong>
+                            <span>${course.total_attendance}</span>
+                        </div>
+                    </div>
+                    
+                    <div style="margin: 20px 0;">
+                        <p><strong>Course Code:</strong> ${course.course_code}</p>
+                        <p><strong>Title:</strong> ${course.course_title}</p>
+                        <p><strong>Lecturer:</strong> ${course.lecturer_name} (${course.lecturer_email})</p>
+                        <p><strong>Created:</strong> ${new Date(course.created_at).toLocaleString()}</p>
+                    </div>
+                    
+                    <h4>Recent Sessions</h4>
+                    ${sessions.length > 0 ? `
+                        <table class="admin-data-table" style="margin-top: 15px;">
+                            <thead>
+                                <tr>
+                                    <th>Date</th>
+                                    <th>Students Present</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${sessions.map(session => `
+                                    <tr>
+                                        <td>${new Date(session.date).toLocaleDateString()}</td>
+                                        <td>${session.student_count} students</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    ` : '<p>No sessions recorded yet</p>'}
+                    
+                    <div class="modal-actions">
+                        <button class="secondary-btn" onclick="closeModal('courseModal')">Close</button>
+                        <button class="secondary-btn" onclick="exportCourseAttendance(${course.id}, '${course.course_code}')">
+    📥 Export Course Attendance
+</button>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        document.body.insertAdjacentHTML('beforeend', modalHTML);
+        
+    } catch (error) {
+        alert(`Failed to load course details: ${error.message}`);
+    }
+}
+
+function confirmDeleteCourse(courseId, courseCode) {
+    showDeleteModal(
+        `Are you sure you want to delete course "${courseCode}"? This will also delete all attendance records for this course.`,
+        () => deleteCourse(courseId)
+    );
+}
+
+async function deleteCourse(courseId) {
+    try {
+        await apiFetch(`/admin/courses/${courseId}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${currentUser.token}` }
+        });
+        
+        closeDeleteModal();
+        loadCoursesData();
+        loadAdminDashboard(); // Refresh stats
+        alert('Course deleted successfully');
+        
+    } catch (error) {
+        alert(`Failed to delete course: ${error.message}`);
+    }
+}
+
+function refreshCoursesList() {
+    loadCoursesData();
+}
+
+// --- REPORTS ---
+
+async function generateAttendanceReport() {
+    const container = document.getElementById('reportResultsContainer');
+    container.innerHTML = '<div class="loading">Generating report...</div>';
+    
+    try {
+        const report = await apiFetch('/admin/reports/attendance', {
+            headers: { 'Authorization': `Bearer ${currentUser.token}` }
+        });
+        
+        if (report.length === 0) {
+            container.innerHTML = '<div class="empty-state"><p>No attendance data available</p></div>';
+            return;
+        }
+        
+        const tableHTML = `
+            <h3>📊 Attendance Report</h3>
+            <table class="admin-data-table" style="margin-top: 20px;">
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Course</th>
+                        <th>Attendance</th>
+                        <th>Unique Students</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${report.map(row => `
+                        <tr>
+                            <td>${new Date(row.date).toLocaleDateString()}</td>
+                            <td><strong>${row.course_code}</strong> - ${row.course_title}</td>
+                            <td>${row.attendance_count} records</td>
+                            <td>${row.unique_students} students</td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+        `;
+        
+        container.innerHTML = tableHTML;
+        
+    } catch (error) {
+        container.innerHTML = `<div class="error-display">Error: ${error.message}</div>`;
+    }
+}
+
+async function generateActivityReport() {
+    const container = document.getElementById('reportResultsContainer');
+    container.innerHTML = '<div class="loading">Generating report...</div>';
+    
+    try {
+        const report = await apiFetch('/admin/reports/activity', {
+            headers: { 'Authorization': `Bearer ${currentUser.token}` }
+        });
+        
+        const activityHTML = `
+            <h3>📅 System Activity Report</h3>
+            
+            <h4 style="margin-top: 30px;">Recent Attendance Codes</h4>
+            <table class="admin-data-table">
+                <thead>
+                    <tr>
+                        <th>Code</th>
+                        <th>Course</th>
+                        <th>Lecturer</th>
+                        <th>Created</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${report.codes.map(code => `
+                        <tr>
+                            <td><strong>${code.code}</strong></td>
+                            <td>${code.course_code} - ${code.course_title}</td>
+                            <td>${code.lecturer_name}</td>
+                            <td>${new Date(code.created_at).toLocaleString()}</td>
+                            <td>
+                                <span class="badge ${code.status === 'Active' ? 'badge-active' : 'badge-expired'}">
+                                    ${code.status}
+                                </span>
+                            </td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+            
+            <h4 style="margin-top: 30px;">Recent Attendance</h4>
+            <table class="admin-data-table">
+                <thead>
+                    <tr>
+                        <th>Student</th>
+                        <th>Mat No.</th>
+                        <th>Course</th>
+                        <th>Time</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${report.recentAttendance.map(record => `
+                        <tr>
+                            <td>${record.student_name}</td>
+                            <td>${record.mat_no}</td>
+                            <td><strong>${record.course_code}</strong></td>
+                            <td>${new Date(record.marked_at).toLocaleString()}</td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+        `;
+        
+        container.innerHTML = activityHTML;
+        
+    } catch (error) {
+        container.innerHTML = `<div class="error-display">Error: ${error.message}</div>`;
+    }
+}
+
+
+
+// --- SYSTEM MANAGEMENT ---
+
+async function loadSystemHealth() {
+    const container = document.getElementById('systemHealthStatus');
+    
+    try {
+        const health = await apiFetch('/health/db', {
+            headers: { 'Authorization': `Bearer ${currentUser.token}` }
+        });
+        
+        const healthHTML = `
+            <div class="system-health-item">
+                <span>Database Status</span>
+                <span class="health-status status-ok">${health.database}</span>
+            </div>
+            <div class="system-health-item">
+                <span>Server Uptime</span>
+                <span>${Math.floor(health.uptime / 60)} minutes</span>
+            </div>
+            <div class="system-health-item">
+                <span>Server Time</span>
+                <span>${new Date(health.serverTime).toLocaleString()}</span>
+            </div>
+        `;
+        
+        container.innerHTML = healthHTML;
+        
+    } catch (error) {
+        container.innerHTML = `<div class="error-display">Error: ${error.message}</div>`;
+    }
+}
+
+async function testDatabaseConnection() {
+    const container = document.getElementById('dbManagementResults');
+    container.innerHTML = '<div class="loading">Testing connection...</div>';
+    
+    try {
+        const result = await apiFetch('/health/db', {
+            headers: { 'Authorization': `Bearer ${currentUser.token}` }
+        });
+        
+        container.innerHTML = `
+            <div class="success-msg" style="margin-top: 15px;">
+                ✅ Database connection successful!<br>
+                Server Time: ${new Date(result.serverTime).toLocaleString()}<br>
+                DB Time: ${new Date(result.databaseTime).toLocaleString()}
+            </div>
+        `;
+        
+    } catch (error) {
+        container.innerHTML = `<div class="error-msg">❌ Connection failed: ${error.message}</div>`;
+    }
+}
+
+async function viewActiveCodes() {
+    const container = document.getElementById('dbManagementResults');
+    container.innerHTML = '<div class="loading">Loading active codes...</div>';
+    
+    try {
+        const codes = await apiFetch('/admin/system/active-codes', {
+            headers: { 'Authorization': `Bearer ${currentUser.token}` }
+        });
+        
+        if (codes.length === 0) {
+            container.innerHTML = '<div class="success-msg" style="margin-top: 15px;">No active codes at the moment</div>';
+            return;
+        }
+        
+        const tableHTML = `
+            <h4 style="margin-top: 20px;">🎫 Active Attendance Codes</h4>
+            <table class="admin-data-table">
+                <thead>
+                    <tr>
+                        <th>Code</th>
+                        <th>Course</th>
+                        <th>Lecturer</th>
+                        <th>Expires</th>
+                        <th>Time Left</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${codes.map(code => {
+                        const minutes = Math.floor(code.seconds_remaining / 60);
+                        const seconds = code.seconds_remaining % 60;
+                        return `
+                            <tr>
+                                <td><strong>${code.code}</strong></td>
+                                <td>${code.course_code} - ${code.course_title}</td>
+                                <td>${code.lecturer_name}</td>
+                                <td>${new Date(code.expires_at).toLocaleString()}</td>
+                                <td>${minutes}m ${seconds}s</td>
+                            </tr>
+                        `;
+                    }).join('')}
+                </tbody>
+            </table>
+        `;
+        
+        container.innerHTML = tableHTML;
+        
+    } catch (error) {
+        container.innerHTML = `<div class="error-msg">Error: ${error.message}</div>`;
+    }
+}
+
+function confirmClearExpiredCodes() {
+    if (confirm('Are you sure you want to clear all expired attendance codes? This action cannot be undone.')) {
+        clearExpiredCodes();
+    }
+}
+
+async function clearExpiredCodes() {
+    const container = document.getElementById('dbManagementResults');
+    
+    try {
+        const result = await apiFetch('/admin/system/clear-expired-codes', {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${currentUser.token}` }
+        });
+        
+        container.innerHTML = `
+            <div class="success-msg" style="margin-top: 15px;">
+                ✅ ${result.message}<br>
+                Deleted ${result.deletedCount} expired codes
+            </div>
+        `;
+        
+    } catch (error) {
+        container.innerHTML = `<div class="error-msg">Error: ${error.message}</div>`;
+    }
+}
+
+// --- MODAL HELPERS ---
+
+function showDeleteModal(message, onConfirm) {
+    const modal = document.getElementById('deleteModal');
+    document.getElementById('deleteModalMessage').textContent = message;
+    
+    const confirmBtn = document.getElementById('confirmDeleteBtn');
+    // Remove old listeners by cloning
+    const newConfirmBtn = confirmBtn.cloneNode(true);
+    confirmBtn.parentNode.replaceChild(newConfirmBtn, confirmBtn);
+    
+    newConfirmBtn.onclick = onConfirm;
+    modal.classList.add('active');
+}
+
+function closeDeleteModal() {
+    document.getElementById('deleteModal').classList.remove('active');
+}
+
+function closeModal(modalId) {
+    const modal = document.getElementById(modalId);
+    if (modal) {
+        modal.remove();
+    }
+}
+
+// ============================================
+// CSV EXPORT FUNCTIONALITY
+// Add these functions to your auth.js file
+// ============================================
+
+// --- UTILITY: Convert JSON to CSV ---
+function convertToCSV(data, headers) {
+    if (!data || data.length === 0) {
+        return '';
+    }
+    
+    // Create header row
+    const headerRow = headers.join(',');
+    
+    // Create data rows
+    const dataRows = data.map(row => {
+        return headers.map(header => {
+            let value = row[header] || '';
+            
+            // Handle dates
+            if (value instanceof Date) {
+                value = value.toISOString();
+            }
+            
+            // Escape quotes and wrap in quotes if contains comma or quote
+            if (typeof value === 'string') {
+                value = value.replace(/"/g, '""');
+                if (value.includes(',') || value.includes('"') || value.includes('\n')) {
+                    value = `"${value}"`;
+                }
+            }
+            
+            return value;
+        }).join(',');
+    });
+    
+    return headerRow + '\n' + dataRows.join('\n');
+}
+
+// --- UTILITY: Download CSV File ---
+function downloadCSV(csvContent, filename) {
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    
+    if (navigator.msSaveBlob) { // IE 10+
+        navigator.msSaveBlob(blob, filename);
+    } else {
+        const url = URL.createObjectURL(blob);
+        link.href = url;
+        link.download = filename;
+        link.style.display = 'none';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+    }
+}
+
+// ============================================
+// ENHANCED CSV EXPORT WITH ADVANCED OPTIONS
+// Replace the exportAllData() function in auth.js with this version
+// ============================================
+
+async function exportAllData() {
+    const modal = document.createElement('div');
+    modal.className = 'modal active';
+    modal.id = 'exportModal';
+    
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width: 700px; max-height: 90vh; overflow-y: auto;">
+            <h3>📥 Export Data to CSV</h3>
+            
+            <div class="export-tabs" style="display: flex; gap: 10px; margin: 20px 0; border-bottom: 2px solid var(--light-bg);">
+                <button class="export-tab-btn active" onclick="switchExportTab('basic')">
+                    Basic Export
+                </button>
+                <button class="export-tab-btn" onclick="switchExportTab('advanced')">
+                    Advanced Reports
+                </button>
+                <button class="export-tab-btn" onclick="switchExportTab('custom')">
+                    Custom Export
+                </button>
+            </div>
+            
+            <!-- BASIC EXPORT TAB -->
+            <div id="basicExportTab" class="export-tab-content active">
+                <p>Select basic data to export:</p>
+                <div style="margin: 25px 0;">
+                    <label class="export-checkbox-label">
+                        <input type="checkbox" id="exportStudents" checked class="export-checkbox">
+                        <strong>👥 Students</strong> - All student records with attendance counts
+                    </label>
+                    
+                    <label class="export-checkbox-label">
+                        <input type="checkbox" id="exportLecturers" checked class="export-checkbox">
+                        <strong>👨‍🏫 Lecturers</strong> - All lecturer records with course counts
+                    </label>
+                    
+                    <label class="export-checkbox-label">
+                        <input type="checkbox" id="exportCourses" checked class="export-checkbox">
+                        <strong>📚 Courses</strong> - All courses with statistics
+                    </label>
+                    
+                    <label class="export-checkbox-label">
+                        <input type="checkbox" id="exportAttendance" checked class="export-checkbox">
+                        <strong>✅ Attendance Records</strong> - All attendance records (detailed)
+                    </label>
+                    
+                    <label class="export-checkbox-label">
+                        <input type="checkbox" id="exportSummary" checked class="export-checkbox">
+                        <strong>📊 Summary Report</strong> - Attendance summary by course and date
+                    </label>
+                </div>
+            </div>
+            
+            <!-- ADVANCED REPORTS TAB -->
+            <div id="advancedExportTab" class="export-tab-content" style="display: none;">
+                <p>Export advanced analytics and reports:</p>
+                <div style="margin: 25px 0;">
+                    <label class="export-checkbox-label">
+                        <input type="checkbox" id="exportStudentStats" class="export-checkbox">
+                        <strong>📈 Student Statistics</strong> - Detailed stats per student (attendance, courses, days)
+                    </label>
+                    
+                    <label class="export-checkbox-label">
+                        <input type="checkbox" id="exportCourseStats" class="export-checkbox">
+                        <strong>📊 Course Statistics</strong> - Detailed stats per course (students, sessions)
+                    </label>
+                    
+                    <label class="export-checkbox-label">
+                        <input type="checkbox" id="exportDailySummary" class="export-checkbox">
+                        <strong>📅 Daily Summary</strong> - Attendance summary by date and course
+                    </label>
+                    
+                    <label class="export-checkbox-label">
+                        <input type="checkbox" id="exportLecturerPerformance" class="export-checkbox">
+                        <strong>🎯 Lecturer Performance</strong> - Teaching statistics and metrics
+                    </label>
+                    
+                    <label class="export-checkbox-label">
+                        <input type="checkbox" id="exportCodesHistory" class="export-checkbox">
+                        <strong>🎫 Codes History</strong> - All generated attendance codes
+                    </label>
+                </div>
+            </div>
+            
+            <!-- CUSTOM EXPORT TAB -->
+            <div id="customExportTab" class="export-tab-content" style="display: none;">
+                <p>Customize your export with filters:</p>
+                
+                <div style="margin: 20px 0;">
+                    <h4>Date Range Filter</h4>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 15px;">
+                        <div>
+                            <label style="display: block; margin-bottom: 5px; font-size: 0.9em;">Start Date:</label>
+                            <input type="date" id="exportStartDate" style="width: 100%; padding: 8px;">
+                        </div>
+                        <div>
+                            <label style="display: block; margin-bottom: 5px; font-size: 0.9em;">End Date:</label>
+                            <input type="date" id="exportEndDate" style="width: 100%; padding: 8px;">
+                        </div>
+                    </div>
+                    
+                    <h4>Course Filter (Optional)</h4>
+                    <select id="exportCourseFilter" style="width: 100%; padding: 10px; margin-bottom: 15px;">
+                        <option value="">All Courses</option>
+                    </select>
+                    
+                    <label class="export-checkbox-label">
+                        <input type="checkbox" id="exportCustomRange" checked class="export-checkbox">
+                        <strong>📊 Export Filtered Data</strong> - Export with applied filters
+                    </label>
+                </div>
+                
+                <div style="background: #374151; padding: 15px; border-radius: 8px; margin-top: 15px;">
+                    <p style="margin: 0; font-size: 0.9em; color: var(--text-dark);">
+                        💡 <strong>Tip:</strong> Leave date fields empty to export all data, or select a course to filter by specific course.
+                    </p>
+                </div>
+            </div>
+            
+            <!-- PROGRESS SECTION -->
+            <div id="exportProgress" class="hidden">
+                <div style="background: #374151; border-radius: 8px; padding: 15px; margin: 20px 0;">
+                    <div id="exportProgressText" style="text-align: center; margin-bottom: 10px; color: var(--text-light);">
+                        Preparing export...
+                    </div>
+                    <div style="background: #1f2937; height: 10px; border-radius: 5px; overflow: hidden;">
+                        <div id="exportProgressBar" style="background: linear-gradient(90deg, #4f46e5, #6366f1); height: 100%; width: 0%; transition: width 0.3s;"></div>
+                    </div>
+                    <div id="exportFilesList" style="margin-top: 15px; font-size: 0.9em; color: var(--text-dark);"></div>
+                </div>
+            </div>
+            
+            <div id="exportError" class="error-msg hidden"></div>
+            <div id="exportSuccess" class="success-msg hidden"></div>
+            
+            <div class="modal-actions" style="margin-top: 25px;">
+                <button class="secondary-btn" onclick="processEnhancedExport()" id="exportBtn" style="background: var(--primary-color); color: white;">
+                    📥 Export Selected Data
+                </button>
+                <button class="secondary-btn" onclick="closeModal('exportModal')">
+                    ❌ Cancel
+                </button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    
+    // Load courses for filter
+    loadCoursesForExport();
+    
+    // Add CSS for export checkboxes
+    const style = document.createElement('style');
+    style.textContent = `
+        .export-checkbox-label {
+            display: flex;
+            align-items: flex-start;
+            margin: 15px 0;
+            padding: 12px;
+            background: var(--light-bg);
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .export-checkbox-label:hover {
+            background: var(--medium-bg);
+        }
+        .export-checkbox {
+            width: 20px !important;
+            height: 20px !important;
+            margin-right: 12px !important;
+            margin-top: 2px;
+            cursor: pointer;
+        }
+        .export-tab-btn {
+            padding: 10px 20px;
+            background: var(--light-bg);
+            border: none;
+            border-bottom: 3px solid transparent;
+            cursor: pointer;
+            color: var(--text-dark);
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+        .export-tab-btn:hover {
+            background: var(--medium-bg);
+            color: var(--text-light);
+        }
+        .export-tab-btn.active {
+            border-bottom-color: var(--primary-color);
+            color: var(--primary-color);
+        }
+        .export-tab-content {
+            display: none;
+            animation: fadeIn 0.3s;
+        }
+        .export-tab-content.active {
+            display: block;
+        }
+    `;
+    document.head.appendChild(style);
+}
+
+function switchExportTab(tabName) {
+    // Hide all tabs
+    document.querySelectorAll('.export-tab-content').forEach(tab => {
+        tab.classList.remove('active');
+    });
+    
+    // Remove active from buttons
+    document.querySelectorAll('.export-tab-btn').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    
+    // Show selected tab
+    document.getElementById(`${tabName}ExportTab`).classList.add('active');
+    event.target.classList.add('active');
+}
+
+async function loadCoursesForExport() {
+    try {
+        const courses = await apiFetch('/admin/courses', {
+            headers: { 'Authorization': `Bearer ${currentUser.token}` }
+        });
+        
+        const select = document.getElementById('exportCourseFilter');
+        courses.forEach(course => {
+            const option = document.createElement('option');
+            option.value = course.id;
+            option.textContent = `${course.course_code} - ${course.course_title}`;
+            select.appendChild(option);
+        });
+    } catch (error) {
+        console.error('Failed to load courses for export:', error);
+    }
+}
+
+async function processEnhancedExport() {
+    // Basic exports
+    const exportStudents = document.getElementById('exportStudents')?.checked || false;
+    const exportLecturers = document.getElementById('exportLecturers')?.checked || false;
+    const exportCourses = document.getElementById('exportCourses')?.checked || false;
+    const exportAttendance = document.getElementById('exportAttendance')?.checked || false;
+    const exportSummary = document.getElementById('exportSummary')?.checked || false;
+    
+    // Advanced reports
+    const exportStudentStats = document.getElementById('exportStudentStats')?.checked || false;
+    const exportCourseStats = document.getElementById('exportCourseStats')?.checked || false;
+    const exportDailySummary = document.getElementById('exportDailySummary')?.checked || false;
+    const exportLecturerPerformance = document.getElementById('exportLecturerPerformance')?.checked || false;
+    const exportCodesHistory = document.getElementById('exportCodesHistory')?.checked || false;
+    
+    // Custom export
+    const exportCustomRange = document.getElementById('exportCustomRange')?.checked || false;
+    const startDate = document.getElementById('exportStartDate')?.value || '';
+    const endDate = document.getElementById('exportEndDate')?.value || '';
+    const courseId = document.getElementById('exportCourseFilter')?.value || '';
+    
+    const selectedExports = [
+        exportStudents, exportLecturers, exportCourses, exportAttendance, exportSummary,
+        exportStudentStats, exportCourseStats, exportDailySummary, exportLecturerPerformance,
+        exportCodesHistory, exportCustomRange
+    ];
+    
+    if (!selectedExports.some(Boolean)) {
+        showExportError('Please select at least one data type to export');
+        return;
+    }
+    
+    // Show progress
+    document.getElementById('exportProgress').classList.remove('hidden');
+    document.getElementById('exportBtn').disabled = true;
+    document.getElementById('exportError').classList.add('hidden');
+    document.getElementById('exportSuccess').classList.add('hidden');
+    
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+    let exportCount = 0;
+    const totalExports = selectedExports.filter(Boolean).length;
+    const exportedFiles = [];
+    
+    try {
+        // Basic Exports
+        if (exportStudents) {
+            updateExportProgress(`Exporting students... (${++exportCount}/${totalExports})`, (exportCount / totalExports) * 100);
+            await exportStudentsCSV(timestamp);
+            exportedFiles.push('✅ students.csv');
+            updateFilesList(exportedFiles);
+        }
+        
+        if (exportLecturers) {
+            updateExportProgress(`Exporting lecturers... (${++exportCount}/${totalExports})`, (exportCount / totalExports) * 100);
+            await exportLecturersCSV(timestamp);
+            exportedFiles.push('✅ lecturers.csv');
+            updateFilesList(exportedFiles);
+        }
+        
+        if (exportCourses) {
+            updateExportProgress(`Exporting courses... (${++exportCount}/${totalExports})`, (exportCount / totalExports) * 100);
+            await exportCoursesCSV(timestamp);
+            exportedFiles.push('✅ courses.csv');
+            updateFilesList(exportedFiles);
+        }
+        
+        if (exportAttendance) {
+            updateExportProgress(`Exporting attendance records... (${++exportCount}/${totalExports})`, (exportCount / totalExports) * 100);
+            await exportAttendanceRecordsCSV(timestamp);
+            exportedFiles.push('✅ attendance_records.csv');
+            updateFilesList(exportedFiles);
+        }
+        
+        if (exportSummary) {
+            updateExportProgress(`Exporting summary report... (${++exportCount}/${totalExports})`, (exportCount / totalExports) * 100);
+            await exportSummaryReportCSV(timestamp);
+            exportedFiles.push('✅ attendance_summary.csv');
+            updateFilesList(exportedFiles);
+        }
+        
+        // Advanced Reports
+        if (exportStudentStats) {
+            updateExportProgress(`Exporting student statistics... (${++exportCount}/${totalExports})`, (exportCount / totalExports) * 100);
+            await exportStudentStatsCSV(timestamp);
+            exportedFiles.push('✅ student_statistics.csv');
+            updateFilesList(exportedFiles);
+        }
+        
+        if (exportCourseStats) {
+            updateExportProgress(`Exporting course statistics... (${++exportCount}/${totalExports})`, (exportCount / totalExports) * 100);
+            await exportCourseStatsCSV(timestamp);
+            exportedFiles.push('✅ course_statistics.csv');
+            updateFilesList(exportedFiles);
+        }
+        
+        if (exportDailySummary) {
+            updateExportProgress(`Exporting daily summary... (${++exportCount}/${totalExports})`, (exportCount / totalExports) * 100);
+            await exportDailySummaryCSV(timestamp);
+            exportedFiles.push('✅ daily_summary.csv');
+            updateFilesList(exportedFiles);
+        }
+        
+        if (exportLecturerPerformance) {
+            updateExportProgress(`Exporting lecturer performance... (${++exportCount}/${totalExports})`, (exportCount / totalExports) * 100);
+            await exportLecturerPerformanceCSV(timestamp);
+            exportedFiles.push('✅ lecturer_performance.csv');
+            updateFilesList(exportedFiles);
+        }
+        
+        if (exportCodesHistory) {
+            updateExportProgress(`Exporting codes history... (${++exportCount}/${totalExports})`, (exportCount / totalExports) * 100);
+            await exportCodesHistoryCSV(timestamp);
+            exportedFiles.push('✅ codes_history.csv');
+            updateFilesList(exportedFiles);
+        }
+        
+        // Custom Range Export
+        if (exportCustomRange) {
+            updateExportProgress(`Exporting custom filtered data... (${++exportCount}/${totalExports})`, (exportCount / totalExports) * 100);
+            await exportCustomRangeCSV(timestamp, startDate, endDate, courseId);
+            exportedFiles.push('✅ custom_filtered_data.csv');
+            updateFilesList(exportedFiles);
+        }
+        
+        updateExportProgress('✅ Export complete!', 100);
+        document.getElementById('exportSuccess').textContent = `🎉 Successfully exported ${exportCount} file(s)!`;
+        document.getElementById('exportSuccess').classList.remove('hidden');
+        document.getElementById('exportBtn').disabled = false;
+        document.getElementById('exportBtn').textContent = '✅ Export Complete';
+        
+        setTimeout(() => {
+            closeModal('exportModal');
+        }, 3000);
+        
+    } catch (error) {
+        console.error('Export error:', error);
+        showExportError(`Export failed: ${error.message}`);
+        document.getElementById('exportBtn').disabled = false;
+    }
+}
+
+function updateFilesList(files) {
+    const container = document.getElementById('exportFilesList');
+    container.innerHTML = '<strong>Downloaded files:</strong><br>' + files.join('<br>');
+}
+
+// Advanced export functions
+async function exportStudentStatsCSV(timestamp) {
+    const stats = await apiFetch('/admin/export/student-stats', {
+        headers: { 'Authorization': `Bearer ${currentUser.token}` }
+    });
+    const headers = ['id', 'mat_no', 'name', 'email', 'phone', 'total_attendance', 'courses_attended', 'days_attended', 'first_attendance', 'last_attendance', 'registration_date'];
+    const csvContent = convertToCSV(stats, headers);
+    downloadCSV(csvContent, `student_statistics_${timestamp}.csv`);
+}
+
+async function exportCourseStatsCSV(timestamp) {
+    const stats = await apiFetch('/admin/export/course-stats', {
+        headers: { 'Authorization': `Bearer ${currentUser.token}` }
+    });
+    const headers = ['id', 'course_code', 'course_title', 'lecturer_name', 'lecturer_id', 'lecturer_email', 'unique_students', 'total_attendance', 'total_sessions', 'first_session', 'last_session', 'course_created'];
+    const csvContent = convertToCSV(stats, headers);
+    downloadCSV(csvContent, `course_statistics_${timestamp}.csv`);
+}
+
+async function exportDailySummaryCSV(timestamp) {
+    const summary = await apiFetch('/admin/export/daily-summary', {
+        headers: { 'Authorization': `Bearer ${currentUser.token}` }
+    });
+    const headers = ['date', 'course_code', 'course_title', 'lecturer_name', 'attendance_count', 'unique_students', 'first_marked', 'last_marked'];
+    const csvContent = convertToCSV(summary, headers);
+    downloadCSV(csvContent, `daily_summary_${timestamp}.csv`);
+}
+
+async function exportLecturerPerformanceCSV(timestamp) {
+    const performance = await apiFetch('/admin/export/lecturer-performance', {
+        headers: { 'Authorization': `Bearer ${currentUser.token}` }
+    });
+    const headers = ['id', 'lecturer_id', 'lecturer_name', 'email', 'total_courses', 'total_students_taught', 'total_attendance_records', 'total_sessions_held', 'first_session', 'last_session', 'joined_date'];
+    const csvContent = convertToCSV(performance, headers);
+    downloadCSV(csvContent, `lecturer_performance_${timestamp}.csv`);
+}
+
+async function exportCodesHistoryCSV(timestamp) {
+    const codes = await apiFetch('/admin/export/codes-history', {
+        headers: { 'Authorization': `Bearer ${currentUser.token}` }
+    });
+    const headers = ['id', 'code', 'course_code', 'course_title', 'lecturer_name', 'generated_at', 'expires_at', 'status', 'validity_minutes', 'students_marked'];
+    const csvContent = convertToCSV(codes, headers);
+    downloadCSV(csvContent, `codes_history_${timestamp}.csv`);
+}
+
+async function exportCustomRangeCSV(timestamp, startDate, endDate, courseId) {
+    let url = '/admin/export/attendance-range?';
+    if (startDate) url += `startDate=${startDate}&`;
+    if (endDate) url += `endDate=${endDate}&`;
+    if (courseId) url += `courseId=${courseId}`;
+    
+    const records = await apiFetch(url, {
+        headers: { 'Authorization': `Bearer ${currentUser.token}` }
+    });
+    
+    const headers = ['id', 'student_name', 'mat_no', 'course_code', 'course_title', 'lecturer_name', 'marked_at', 'attendance_date', 'attendance_time'];
+    const csvContent = convertToCSV(records, headers);
+    
+    let filename = `custom_export_${timestamp}`;
+    if (startDate && endDate) filename += `_${startDate}_to_${endDate}`;
+    downloadCSV(csvContent, `${filename}.csv`);
+}
+// --- PROCESS EXPORT ---
+async function processExport() {
+    const exportStudents = document.getElementById('exportStudents').checked;
+    const exportLecturers = document.getElementById('exportLecturers').checked;
+    const exportCourses = document.getElementById('exportCourses').checked;
+    const exportAttendance = document.getElementById('exportAttendance').checked;
+    const exportSummary = document.getElementById('exportSummary').checked;
+    
+    if (!exportStudents && !exportLecturers && !exportCourses && !exportAttendance && !exportSummary) {
+        showExportError('Please select at least one data type to export');
+        return;
+    }
+    
+    // Show progress
+    document.getElementById('exportProgress').classList.remove('hidden');
+    document.getElementById('exportBtn').disabled = true;
+    document.getElementById('exportError').classList.add('hidden');
+    document.getElementById('exportSuccess').classList.add('hidden');
+    
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+    let exportCount = 0;
+    const totalExports = [exportStudents, exportLecturers, exportCourses, exportAttendance, exportSummary].filter(Boolean).length;
+    
+    try {
+        // Export Students
+        if (exportStudents) {
+            updateExportProgress(`Exporting students... (${++exportCount}/${totalExports})`, (exportCount / totalExports) * 100);
+            await exportStudentsCSV(timestamp);
+        }
+        
+        // Export Lecturers
+        if (exportLecturers) {
+            updateExportProgress(`Exporting lecturers... (${++exportCount}/${totalExports})`, (exportCount / totalExports) * 100);
+            await exportLecturersCSV(timestamp);
+        }
+        
+        // Export Courses
+        if (exportCourses) {
+            updateExportProgress(`Exporting courses... (${++exportCount}/${totalExports})`, (exportCount / totalExports) * 100);
+            await exportCoursesCSV(timestamp);
+        }
+        
+        // Export Attendance Records
+        if (exportAttendance) {
+            updateExportProgress(`Exporting attendance records... (${++exportCount}/${totalExports})`, (exportCount / totalExports) * 100);
+            await exportAttendanceRecordsCSV(timestamp);
+        }
+        
+        // Export Summary
+        if (exportSummary) {
+            updateExportProgress(`Exporting summary report... (${++exportCount}/${totalExports})`, (exportCount / totalExports) * 100);
+            await exportSummaryReportCSV(timestamp);
+        }
+        
+        updateExportProgress('✅ Export complete!', 100);
+        document.getElementById('exportSuccess').textContent = `Successfully exported ${exportCount} file(s)!`;
+        document.getElementById('exportSuccess').classList.remove('hidden');
+        document.getElementById('exportBtn').disabled = false;
+        
+        setTimeout(() => {
+            closeModal('exportModal');
+        }, 2000);
+        
+    } catch (error) {
+        console.error('Export error:', error);
+        showExportError(`Export failed: ${error.message}`);
+        document.getElementById('exportBtn').disabled = false;
+    }
+}
+
+function updateExportProgress(text, percent) {
+    document.getElementById('exportProgressText').textContent = text;
+    document.getElementById('exportProgressBar').style.width = `${percent}%`;
+}
+
+function showExportError(message) {
+    const errorEl = document.getElementById('exportError');
+    errorEl.textContent = message;
+    errorEl.classList.remove('hidden');
+}
+
+// --- EXPORT STUDENTS TO CSV ---
+async function exportStudentsCSV(timestamp) {
+    const students = await apiFetch('/admin/students', {
+        headers: { 'Authorization': `Bearer ${currentUser.token}` }
+    });
+    
+    const headers = ['id', 'mat_no', 'name', 'email', 'phone', 'attendance_count', 'created_at'];
+    const csvContent = convertToCSV(students, headers);
+    downloadCSV(csvContent, `students_${timestamp}.csv`);
+}
+
+// --- EXPORT LECTURERS TO CSV ---
+async function exportLecturersCSV(timestamp) {
+    const lecturers = await apiFetch('/admin/lecturers', {
+        headers: { 'Authorization': `Bearer ${currentUser.token}` }
+    });
+    
+    const headers = ['id', 'lecturer_id', 'name', 'email', 'phone', 'course_count', 'created_at'];
+    const csvContent = convertToCSV(lecturers, headers);
+    downloadCSV(csvContent, `lecturers_${timestamp}.csv`);
+}
+
+// --- EXPORT COURSES TO CSV ---
+async function exportCoursesCSV(timestamp) {
+    const courses = await apiFetch('/admin/courses', {
+        headers: { 'Authorization': `Bearer ${currentUser.token}` }
+    });
+    
+    const headers = ['id', 'course_code', 'course_title', 'lecturer_name', 'lecturer_id', 'unique_students', 'attendance_count', 'created_at'];
+    const csvContent = convertToCSV(courses, headers);
+    downloadCSV(csvContent, `courses_${timestamp}.csv`);
+}
+
+// --- EXPORT ATTENDANCE RECORDS TO CSV ---
+async function exportAttendanceRecordsCSV(timestamp) {
+    // Use the attendance report endpoint with no filters to get all records
+    const records = await apiFetch('/admin/export/attendance-records', {
+        headers: { 'Authorization': `Bearer ${currentUser.token}` }
+    });
+    
+    const headers = ['id', 'student_name', 'mat_no', 'course_code', 'course_title', 'lecturer_name', 'marked_at', 'attendance_date', 'attendance_time'];
+    const csvContent = convertToCSV(records, headers);
+    downloadCSV(csvContent, `attendance_records_${timestamp}.csv`);
+}
+
+// --- EXPORT SUMMARY REPORT TO CSV ---
+async function exportSummaryReportCSV(timestamp) {
+    const summary = await apiFetch('/admin/reports/attendance', {
+        headers: { 'Authorization': `Bearer ${currentUser.token}` }
+    });
+    
+    const headers = ['date', 'course_code', 'course_title', 'attendance_count', 'unique_students'];
+    const csvContent = convertToCSV(summary, headers);
+    downloadCSV(csvContent, `attendance_summary_${timestamp}.csv`);
+}
+
+// --- EXPORT INDIVIDUAL COURSE ---
+async function exportCourseAttendance(courseId, courseName) {
+    try {
+        const records = await apiFetch(`/attendance/${courseId}`, {
+            headers: { 'Authorization': `Bearer ${currentUser.token}` }
+        });
+        
+        if (records.length === 0) {
+            alert('No attendance records to export');
+            return;
+        }
+        
+        const headers = ['student_name', 'mat_no', 'attendance_date', 'attendance_time', 'course_code', 'course_title'];
+        const csvContent = convertToCSV(records, headers);
+        
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+        const filename = `${courseName.replace(/\s+/g, '_')}_attendance_${timestamp}.csv`;
+        
+        downloadCSV(csvContent, filename);
+        alert('Export successful!');
+        
+    } catch (error) {
+        alert(`Export failed: ${error.message}`);
+    }
+}
+
+// --- EXPORT STUDENT ATTENDANCE HISTORY ---
+async function exportStudentAttendanceHistory(studentId, studentName) {
+    try {
+        const data = await apiFetch(`/admin/students/${studentId}`, {
+            headers: { 'Authorization': `Bearer ${currentUser.token}` }
+        });
+        
+        if (data.recentAttendance.length === 0) {
+            alert('No attendance records to export');
+            return;
+        }
+        
+        const headers = ['marked_at', 'course_code', 'course_title'];
+        const csvContent = convertToCSV(data.recentAttendance, headers);
+        
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+        const filename = `${studentName.replace(/\s+/g, '_')}_attendance_${timestamp}.csv`;
+        
+        downloadCSV(csvContent, filename);
+        alert('Export successful!');
+        
+    } catch (error) {
+        alert(`Export failed: ${error.message}`);
+    }
+}
+
 
 // ============================================
 // INITIALIZATION & LOGOUT
@@ -1443,9 +3016,10 @@ function init() {
                 document.getElementById('lecturerWelcome').textContent = `Welcome, ${currentUser.info.name}!`;
                 loadLecturerData();
                 navigate('lecturer');
-            } else if(currentUser.type === 'admin') {
-                navigate('admin');
-            } else {
+            } else if (currentUser.type === 'admin') {
+    loadAdminDashboard();
+    navigate('admin');
+} else {
                 logout();
             }
         } catch (e) {

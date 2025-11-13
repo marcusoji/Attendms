@@ -1176,8 +1176,789 @@ app.get('/api/courses/:courseId/stats', verifyToken, asyncHandler(async (req, re
     }
 }));
 // Add these routes to your server.js file after your existing routes
-// These should be placed before the "Handle 404" section
+// ============================================
+// ADMIN ROUTES - Add these to your server.js
+// Place these BEFORE the "Handle 404" section
+// ============================================
 
+// Middleware to verify admin access
+const verifyAdmin = (req, res, next) => {
+    if (req.user.type !== 'admin') {
+        log('warn', 'Admin access denied', { userId: req.user.id, userType: req.user.type });
+        return res.status(403).json({ message: 'Access denied: Admins only' });
+    }
+    next();
+};
+
+// --- DASHBOARD STATISTICS ---
+
+app.get('/api/admin/stats', verifyToken, verifyAdmin, asyncHandler(async (req, res) => {
+    try {
+        const [students] = await db.query('SELECT COUNT(*) as count FROM students');
+        const [lecturers] = await db.query('SELECT COUNT(*) as count FROM lecturers');
+        const [courses] = await db.query('SELECT COUNT(*) as count FROM courses');
+        const [attendance] = await db.query('SELECT COUNT(*) as count FROM attendance_records');
+        
+        res.json({
+            students: students[0].count,
+            lecturers: lecturers[0].count,
+            courses: courses[0].count,
+            attendance: attendance[0].count
+        });
+        
+        log('info', 'Admin stats retrieved', { adminId: req.user.id });
+    } catch (error) {
+        log('error', 'Admin stats error', error);
+        res.status(500).json({ message: 'Failed to retrieve statistics' });
+    }
+}));
+
+// --- STUDENT MANAGEMENT ---
+
+app.get('/api/admin/students', verifyToken, verifyAdmin, asyncHandler(async (req, res) => {
+    try {
+        const [students] = await db.query(`
+            SELECT 
+                id, 
+                mat_no, 
+                name, 
+                email, 
+                phone, 
+                created_at,
+                (SELECT COUNT(*) FROM attendance_records WHERE student_id = students.id) as attendance_count
+            FROM students 
+            ORDER BY created_at DESC
+        `);
+        
+        res.json(students);
+        log('info', 'Students list retrieved', { adminId: req.user.id, count: students.length });
+    } catch (error) {
+        log('error', 'Students list error', error);
+        res.status(500).json({ message: 'Failed to retrieve students' });
+    }
+}));
+
+app.get('/api/admin/students/:id', verifyToken, verifyAdmin, asyncHandler(async (req, res) => {
+    try {
+        const { id } = req.params;
+        
+        const [students] = await db.query(`
+            SELECT 
+                s.*,
+                (SELECT COUNT(*) FROM attendance_records WHERE student_id = s.id) as total_attendance,
+                (SELECT COUNT(DISTINCT course_id) FROM attendance_records WHERE student_id = s.id) as courses_attended
+            FROM students s
+            WHERE s.id = ?
+        `, [id]);
+        
+        if (students.length === 0) {
+            return res.status(404).json({ message: 'Student not found' });
+        }
+        
+        const [attendance] = await db.query(`
+            SELECT 
+                ar.marked_at,
+                c.course_code,
+                c.course_title
+            FROM attendance_records ar
+            JOIN courses c ON ar.course_id = c.id
+            WHERE ar.student_id = ?
+            ORDER BY ar.marked_at DESC
+            LIMIT 20
+        `, [id]);
+        
+        res.json({
+            student: students[0],
+            recentAttendance: attendance
+        });
+        
+    } catch (error) {
+        log('error', 'Student details error', error);
+        res.status(500).json({ message: 'Failed to retrieve student details' });
+    }
+}));
+
+app.delete('/api/admin/students/:id', verifyToken, verifyAdmin, asyncHandler(async (req, res) => {
+    try {
+        const { id } = req.params;
+        
+        // Delete attendance records first (foreign key constraint)
+        await db.query('DELETE FROM attendance_records WHERE student_id = ?', [id]);
+        
+        // Delete student
+        const [result] = await db.query('DELETE FROM students WHERE id = ?', [id]);
+        
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ message: 'Student not found' });
+        }
+        
+        log('info', 'Student deleted', { adminId: req.user.id, studentId: id });
+        res.json({ message: 'Student deleted successfully' });
+        
+    } catch (error) {
+        log('error', 'Student deletion error', error);
+        res.status(500).json({ message: 'Failed to delete student' });
+    }
+}));
+
+// --- LECTURER MANAGEMENT ---
+
+app.get('/api/admin/lecturers', verifyToken, verifyAdmin, asyncHandler(async (req, res) => {
+    try {
+        const [lecturers] = await db.query(`
+            SELECT 
+                l.id, 
+                l.lecturer_id,
+                l.name, 
+                l.email,
+                l.phone,
+                l.created_at,
+                (SELECT COUNT(*) FROM courses WHERE lecturer_id = l.id) as course_count
+            FROM lecturers l
+            ORDER BY l.created_at DESC
+        `);
+        
+        res.json(lecturers);
+        log('info', 'Lecturers list retrieved', { adminId: req.user.id, count: lecturers.length });
+    } catch (error) {
+        log('error', 'Lecturers list error', error);
+        res.status(500).json({ message: 'Failed to retrieve lecturers' });
+    }
+}));
+
+app.get('/api/admin/lecturers/:id', verifyToken, verifyAdmin, asyncHandler(async (req, res) => {
+    try {
+        const { id } = req.params;
+        
+        const [lecturers] = await db.query(`
+            SELECT 
+                l.*,
+                (SELECT COUNT(*) FROM courses WHERE lecturer_id = l.id) as total_courses
+            FROM lecturers l
+            WHERE l.id = ?
+        `, [id]);
+        
+        if (lecturers.length === 0) {
+            return res.status(404).json({ message: 'Lecturer not found' });
+        }
+        
+        const [courses] = await db.query(`
+            SELECT 
+                c.id,
+                c.course_code,
+                c.course_title,
+                c.created_at,
+                (SELECT COUNT(*) FROM attendance_records WHERE course_id = c.id) as attendance_count
+            FROM courses c
+            WHERE c.lecturer_id = ?
+            ORDER BY c.created_at DESC
+        `, [id]);
+        
+        res.json({
+            lecturer: lecturers[0],
+            courses: courses
+        });
+        
+    } catch (error) {
+        log('error', 'Lecturer details error', error);
+        res.status(500).json({ message: 'Failed to retrieve lecturer details' });
+    }
+}));
+
+app.delete('/api/admin/lecturers/:id', verifyToken, verifyAdmin, asyncHandler(async (req, res) => {
+    try {
+        const { id } = req.params;
+        
+        // Get all courses by this lecturer
+        const [courses] = await db.query('SELECT id FROM courses WHERE lecturer_id = ?', [id]);
+        
+        // Delete attendance records for all their courses
+        for (const course of courses) {
+            await db.query('DELETE FROM attendance_records WHERE course_id = ?', [course.id]);
+        }
+        
+        // Delete attendance codes
+        for (const course of courses) {
+            await db.query('DELETE FROM attendance_codes WHERE course_id = ?', [course.id]);
+        }
+        
+        // Delete courses
+        await db.query('DELETE FROM courses WHERE lecturer_id = ?', [id]);
+        
+        // Delete lecturer
+        const [result] = await db.query('DELETE FROM lecturers WHERE id = ?', [id]);
+        
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ message: 'Lecturer not found' });
+        }
+        
+        log('info', 'Lecturer deleted', { adminId: req.user.id, lecturerId: id });
+        res.json({ message: 'Lecturer and associated data deleted successfully' });
+        
+    } catch (error) {
+        log('error', 'Lecturer deletion error', error);
+        res.status(500).json({ message: 'Failed to delete lecturer' });
+    }
+}));
+
+// --- COURSE MANAGEMENT ---
+
+app.get('/api/admin/courses', verifyToken, verifyAdmin, asyncHandler(async (req, res) => {
+    try {
+        const [courses] = await db.query(`
+            SELECT 
+                c.id,
+                c.course_code,
+                c.course_title,
+                c.created_at,
+                l.name as lecturer_name,
+                l.lecturer_id,
+                (SELECT COUNT(*) FROM attendance_records WHERE course_id = c.id) as attendance_count,
+                (SELECT COUNT(DISTINCT student_id) FROM attendance_records WHERE course_id = c.id) as unique_students
+            FROM courses c
+            JOIN lecturers l ON c.lecturer_id = l.id
+            ORDER BY c.created_at DESC
+        `);
+        
+        res.json(courses);
+        log('info', 'Courses list retrieved', { adminId: req.user.id, count: courses.length });
+    } catch (error) {
+        log('error', 'Courses list error', error);
+        res.status(500).json({ message: 'Failed to retrieve courses' });
+    }
+}));
+
+app.get('/api/admin/courses/:id', verifyToken, verifyAdmin, asyncHandler(async (req, res) => {
+    try {
+        const { id } = req.params;
+        
+        const [courses] = await db.query(`
+            SELECT 
+                c.*,
+                l.name as lecturer_name,
+                l.email as lecturer_email,
+                (SELECT COUNT(*) FROM attendance_records WHERE course_id = c.id) as total_attendance,
+                (SELECT COUNT(DISTINCT student_id) FROM attendance_records WHERE course_id = c.id) as unique_students,
+                (SELECT COUNT(DISTINCT DATE(marked_at)) FROM attendance_records WHERE course_id = c.id) as total_sessions
+            FROM courses c
+            JOIN lecturers l ON c.lecturer_id = l.id
+            WHERE c.id = ?
+        `, [id]);
+        
+        if (courses.length === 0) {
+            return res.status(404).json({ message: 'Course not found' });
+        }
+        
+        const [recentAttendance] = await db.query(`
+            SELECT 
+                DATE(ar.marked_at) as date,
+                COUNT(*) as student_count
+            FROM attendance_records ar
+            WHERE ar.course_id = ?
+            GROUP BY DATE(ar.marked_at)
+            ORDER BY date DESC
+            LIMIT 10
+        `, [id]);
+        
+        res.json({
+            course: courses[0],
+            recentSessions: recentAttendance
+        });
+        
+    } catch (error) {
+        log('error', 'Course details error', error);
+        res.status(500).json({ message: 'Failed to retrieve course details' });
+    }
+}));
+
+app.delete('/api/admin/courses/:id', verifyToken, verifyAdmin, asyncHandler(async (req, res) => {
+    try {
+        const { id } = req.params;
+        
+        // Delete attendance records
+        await db.query('DELETE FROM attendance_records WHERE course_id = ?', [id]);
+        
+        // Delete attendance codes
+        await db.query('DELETE FROM attendance_codes WHERE course_id = ?', [id]);
+        
+        // Delete course
+        const [result] = await db.query('DELETE FROM courses WHERE id = ?', [id]);
+        
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ message: 'Course not found' });
+        }
+        
+        log('info', 'Course deleted', { adminId: req.user.id, courseId: id });
+        res.json({ message: 'Course and associated data deleted successfully' });
+        
+    } catch (error) {
+        log('error', 'Course deletion error', error);
+        res.status(500).json({ message: 'Failed to delete course' });
+    }
+}));
+
+// --- REPORTS ---
+
+app.get('/api/admin/reports/attendance', verifyToken, verifyAdmin, asyncHandler(async (req, res) => {
+    try {
+        const { startDate, endDate, courseId } = req.query;
+        
+        let query = `
+            SELECT 
+                DATE(ar.marked_at) as date,
+                c.course_code,
+                c.course_title,
+                COUNT(*) as attendance_count,
+                COUNT(DISTINCT ar.student_id) as unique_students
+            FROM attendance_records ar
+            JOIN courses c ON ar.course_id = c.id
+            WHERE 1=1
+        `;
+        
+        const params = [];
+        
+        if (startDate) {
+            query += ' AND DATE(ar.marked_at) >= ?';
+            params.push(startDate);
+        }
+        
+        if (endDate) {
+            query += ' AND DATE(ar.marked_at) <= ?';
+            params.push(endDate);
+        }
+        
+        if (courseId) {
+            query += ' AND c.id = ?';
+            params.push(courseId);
+        }
+        
+        query += ' GROUP BY DATE(ar.marked_at), c.id ORDER BY date DESC';
+        
+        const [results] = await db.query(query, params);
+        
+        res.json(results);
+        log('info', 'Attendance report generated', { adminId: req.user.id });
+        
+    } catch (error) {
+        log('error', 'Attendance report error', error);
+        res.status(500).json({ message: 'Failed to generate report' });
+    }
+}));
+
+app.get('/api/admin/reports/activity', verifyToken, verifyAdmin, asyncHandler(async (req, res) => {
+    try {
+        const [codes] = await db.query(`
+            SELECT 
+                ac.code,
+                ac.created_at,
+                ac.expires_at,
+                c.course_code,
+                c.course_title,
+                l.name as lecturer_name,
+                CASE 
+                    WHEN ac.expires_at > UTC_TIMESTAMP() THEN 'Active'
+                    ELSE 'Expired'
+                END as status
+            FROM attendance_codes ac
+            JOIN courses c ON ac.course_id = c.id
+            JOIN lecturers l ON c.lecturer_id = l.id
+            ORDER BY ac.created_at DESC
+            LIMIT 50
+        `);
+        
+        const [recentAttendance] = await db.query(`
+            SELECT 
+                ar.marked_at,
+                s.name as student_name,
+                s.mat_no,
+                c.course_code
+            FROM attendance_records ar
+            JOIN students s ON ar.student_id = s.id
+            JOIN courses c ON ar.course_id = c.id
+            ORDER BY ar.marked_at DESC
+            LIMIT 50
+        `);
+        
+        res.json({
+            codes: codes,
+            recentAttendance: recentAttendance
+        });
+        
+        log('info', 'Activity report generated', { adminId: req.user.id });
+        
+    } catch (error) {
+        log('error', 'Activity report error', error);
+        res.status(500).json({ message: 'Failed to generate activity report' });
+    }
+}));
+
+// --- SYSTEM MANAGEMENT ---
+
+app.delete('/api/admin/system/clear-expired-codes', verifyToken, verifyAdmin, asyncHandler(async (req, res) => {
+    try {
+        const [result] = await db.query('DELETE FROM attendance_codes WHERE expires_at < UTC_TIMESTAMP()');
+        
+        log('info', 'Expired codes cleared', { adminId: req.user.id, deletedCount: result.affectedRows });
+        res.json({ 
+            message: 'Expired codes cleared successfully', 
+            deletedCount: result.affectedRows 
+        });
+        
+    } catch (error) {
+        log('error', 'Clear expired codes error', error);
+        res.status(500).json({ message: 'Failed to clear expired codes' });
+    }
+}));
+
+app.get('/api/admin/system/active-codes', verifyToken, verifyAdmin, asyncHandler(async (req, res) => {
+    try {
+        const [codes] = await db.query(`
+            SELECT 
+                ac.code,
+                ac.expires_at,
+                c.course_code,
+                c.course_title,
+                l.name as lecturer_name,
+                TIMESTAMPDIFF(SECOND, UTC_TIMESTAMP(), ac.expires_at) as seconds_remaining
+            FROM attendance_codes ac
+            JOIN courses c ON ac.course_id = c.id
+            JOIN lecturers l ON c.lecturer_id = l.id
+            WHERE ac.expires_at > UTC_TIMESTAMP()
+            ORDER BY ac.expires_at ASC
+        `);
+        
+        res.json(codes);
+        
+    } catch (error) {
+        log('error', 'Active codes query error', error);
+        res.status(500).json({ message: 'Failed to retrieve active codes' });
+    }
+}));
+// ============================================
+// CSV EXPORT BACKEND ROUTES
+// Add these to your server.js (with other admin routes)
+// ============================================
+
+// --- EXPORT: All Attendance Records (Detailed) ---
+app.get('/api/admin/export/attendance-records', verifyToken, verifyAdmin, asyncHandler(async (req, res) => {
+    try {
+        log('info', 'Exporting all attendance records', { adminId: req.user.id });
+        
+        const [records] = await db.query(`
+            SELECT 
+                ar.id,
+                s.name as student_name,
+                s.mat_no,
+                c.course_code,
+                c.course_title,
+                l.name as lecturer_name,
+                ar.marked_at,
+                DATE(ar.marked_at) as attendance_date,
+                TIME(ar.marked_at) as attendance_time
+            FROM attendance_records ar
+            JOIN students s ON ar.student_id = s.id
+            JOIN courses c ON ar.course_id = c.id
+            JOIN lecturers l ON c.lecturer_id = l.id
+            ORDER BY ar.marked_at DESC
+        `);
+        
+        log('info', 'Attendance records exported', { 
+            adminId: req.user.id, 
+            recordCount: records.length 
+        });
+        
+        res.json(records);
+        
+    } catch (error) {
+        log('error', 'Attendance records export error', error);
+        res.status(500).json({ message: 'Failed to export attendance records' });
+    }
+}));
+
+// --- EXPORT: Attendance by Date Range ---
+app.get('/api/admin/export/attendance-range', verifyToken, verifyAdmin, asyncHandler(async (req, res) => {
+    try {
+        const { startDate, endDate, courseId } = req.query;
+        
+        let query = `
+            SELECT 
+                ar.id,
+                s.name as student_name,
+                s.mat_no,
+                c.course_code,
+                c.course_title,
+                l.name as lecturer_name,
+                ar.marked_at,
+                DATE(ar.marked_at) as attendance_date,
+                TIME(ar.marked_at) as attendance_time
+            FROM attendance_records ar
+            JOIN students s ON ar.student_id = s.id
+            JOIN courses c ON ar.course_id = c.id
+            JOIN lecturers l ON c.lecturer_id = l.id
+            WHERE 1=1
+        `;
+        
+        const params = [];
+        
+        if (startDate) {
+            query += ' AND DATE(ar.marked_at) >= ?';
+            params.push(startDate);
+        }
+        
+        if (endDate) {
+            query += ' AND DATE(ar.marked_at) <= ?';
+            params.push(endDate);
+        }
+        
+        if (courseId) {
+            query += ' AND c.id = ?';
+            params.push(courseId);
+        }
+        
+        query += ' ORDER BY ar.marked_at DESC';
+        
+        const [records] = await db.query(query, params);
+        
+        log('info', 'Date range export completed', {
+            adminId: req.user.id,
+            startDate,
+            endDate,
+            courseId,
+            recordCount: records.length
+        });
+        
+        res.json(records);
+        
+    } catch (error) {
+        log('error', 'Date range export error', error);
+        res.status(500).json({ message: 'Failed to export date range' });
+    }
+}));
+
+// --- EXPORT: Student Statistics Report ---
+app.get('/api/admin/export/student-stats', verifyToken, verifyAdmin, asyncHandler(async (req, res) => {
+    try {
+        const [stats] = await db.query(`
+            SELECT 
+                s.id,
+                s.mat_no,
+                s.name,
+                s.email,
+                s.phone,
+                COUNT(ar.id) as total_attendance,
+                COUNT(DISTINCT ar.course_id) as courses_attended,
+                COUNT(DISTINCT DATE(ar.marked_at)) as days_attended,
+                MIN(ar.marked_at) as first_attendance,
+                MAX(ar.marked_at) as last_attendance,
+                s.created_at as registration_date
+            FROM students s
+            LEFT JOIN attendance_records ar ON s.id = ar.student_id
+            GROUP BY s.id, s.mat_no, s.name, s.email, s.phone, s.created_at
+            ORDER BY s.name ASC
+        `);
+        
+        log('info', 'Student statistics exported', {
+            adminId: req.user.id,
+            studentCount: stats.length
+        });
+        
+        res.json(stats);
+        
+    } catch (error) {
+        log('error', 'Student stats export error', error);
+        res.status(500).json({ message: 'Failed to export student statistics' });
+    }
+}));
+
+// --- EXPORT: Course Statistics Report ---
+app.get('/api/admin/export/course-stats', verifyToken, verifyAdmin, asyncHandler(async (req, res) => {
+    try {
+        const [stats] = await db.query(`
+            SELECT 
+                c.id,
+                c.course_code,
+                c.course_title,
+                l.name as lecturer_name,
+                l.lecturer_id,
+                l.email as lecturer_email,
+                COUNT(DISTINCT ar.student_id) as unique_students,
+                COUNT(ar.id) as total_attendance,
+                COUNT(DISTINCT DATE(ar.marked_at)) as total_sessions,
+                MIN(DATE(ar.marked_at)) as first_session,
+                MAX(DATE(ar.marked_at)) as last_session,
+                c.created_at as course_created
+            FROM courses c
+            JOIN lecturers l ON c.lecturer_id = l.id
+            LEFT JOIN attendance_records ar ON c.id = ar.course_id
+            GROUP BY c.id, c.course_code, c.course_title, l.name, l.lecturer_id, l.email, c.created_at
+            ORDER BY c.course_code ASC
+        `);
+        
+        log('info', 'Course statistics exported', {
+            adminId: req.user.id,
+            courseCount: stats.length
+        });
+        
+        res.json(stats);
+        
+    } catch (error) {
+        log('error', 'Course stats export error', error);
+        res.status(500).json({ message: 'Failed to export course statistics' });
+    }
+}));
+
+// --- EXPORT: Daily Attendance Summary ---
+app.get('/api/admin/export/daily-summary', verifyToken, verifyAdmin, asyncHandler(async (req, res) => {
+    try {
+        const [summary] = await db.query(`
+            SELECT 
+                DATE(ar.marked_at) as date,
+                c.course_code,
+                c.course_title,
+                l.name as lecturer_name,
+                COUNT(ar.id) as attendance_count,
+                COUNT(DISTINCT ar.student_id) as unique_students,
+                MIN(TIME(ar.marked_at)) as first_marked,
+                MAX(TIME(ar.marked_at)) as last_marked
+            FROM attendance_records ar
+            JOIN courses c ON ar.course_id = c.id
+            JOIN lecturers l ON c.lecturer_id = l.id
+            GROUP BY DATE(ar.marked_at), c.id, c.course_code, c.course_title, l.name
+            ORDER BY date DESC, c.course_code ASC
+        `);
+        
+        log('info', 'Daily summary exported', {
+            adminId: req.user.id,
+            recordCount: summary.length
+        });
+        
+        res.json(summary);
+        
+    } catch (error) {
+        log('error', 'Daily summary export error', error);
+        res.status(500).json({ message: 'Failed to export daily summary' });
+    }
+}));
+
+// --- EXPORT: Lecturer Performance Report ---
+app.get('/api/admin/export/lecturer-performance', verifyToken, verifyAdmin, asyncHandler(async (req, res) => {
+    try {
+        const [performance] = await db.query(`
+            SELECT 
+                l.id,
+                l.lecturer_id,
+                l.name as lecturer_name,
+                l.email,
+                COUNT(DISTINCT c.id) as total_courses,
+                COUNT(DISTINCT ar.student_id) as total_students_taught,
+                COUNT(ar.id) as total_attendance_records,
+                COUNT(DISTINCT DATE(ar.marked_at)) as total_sessions_held,
+                MIN(ar.marked_at) as first_session,
+                MAX(ar.marked_at) as last_session,
+                l.created_at as joined_date
+            FROM lecturers l
+            LEFT JOIN courses c ON l.id = c.lecturer_id
+            LEFT JOIN attendance_records ar ON c.id = ar.course_id
+            GROUP BY l.id, l.lecturer_id, l.name, l.email, l.created_at
+            ORDER BY l.name ASC
+        `);
+        
+        log('info', 'Lecturer performance exported', {
+            adminId: req.user.id,
+            lecturerCount: performance.length
+        });
+        
+        res.json(performance);
+        
+    } catch (error) {
+        log('error', 'Lecturer performance export error', error);
+        res.status(500).json({ message: 'Failed to export lecturer performance' });
+    }
+}));
+
+// --- EXPORT: Attendance Codes History ---
+app.get('/api/admin/export/codes-history', verifyToken, verifyAdmin, asyncHandler(async (req, res) => {
+    try {
+        const [codes] = await db.query(`
+            SELECT 
+                ac.id,
+                ac.code,
+                c.course_code,
+                c.course_title,
+                l.name as lecturer_name,
+                ac.created_at as generated_at,
+                ac.expires_at,
+                CASE 
+                    WHEN ac.expires_at > UTC_TIMESTAMP() THEN 'Active'
+                    ELSE 'Expired'
+                END as status,
+                TIMESTAMPDIFF(MINUTE, ac.created_at, ac.expires_at) as validity_minutes,
+                (SELECT COUNT(*) 
+                 FROM attendance_records ar 
+                 WHERE ar.course_id = ac.course_id 
+                 AND DATE(ar.marked_at) = DATE(ac.created_at)) as students_marked
+            FROM attendance_codes ac
+            JOIN courses c ON ac.course_id = c.id
+            JOIN lecturers l ON c.lecturer_id = l.id
+            ORDER BY ac.created_at DESC
+        `);
+        
+        log('info', 'Codes history exported', {
+            adminId: req.user.id,
+            codeCount: codes.length
+        });
+        
+        res.json(codes);
+        
+    } catch (error) {
+        log('error', 'Codes history export error', error);
+        res.status(500).json({ message: 'Failed to export codes history' });
+    }
+}));
+
+// --- EXPORT: Complete System Backup (All Data) ---
+app.get('/api/admin/export/full-backup', verifyToken, verifyAdmin, asyncHandler(async (req, res) => {
+    try {
+        log('info', 'Full system backup initiated', { adminId: req.user.id });
+        
+        // Get all data
+        const [students] = await db.query('SELECT * FROM students');
+        const [lecturers] = await db.query('SELECT id, lecturer_id, name, email, phone, created_at FROM lecturers');
+        const [courses] = await db.query('SELECT * FROM courses');
+        const [attendance] = await db.query('SELECT * FROM attendance_records');
+        const [codes] = await db.query('SELECT * FROM attendance_codes');
+        
+        const backup = {
+            exportDate: new Date().toISOString(),
+            exportedBy: req.user.email || req.user.id,
+            statistics: {
+                students: students.length,
+                lecturers: lecturers.length,
+                courses: courses.length,
+                attendance: attendance.length,
+                codes: codes.length
+            },
+            data: {
+                students,
+                lecturers,
+                courses,
+                attendance_records: attendance,
+                attendance_codes: codes
+            }
+        };
+        
+        log('info', 'Full backup completed', {
+            adminId: req.user.id,
+            totalRecords: students.length + lecturers.length + courses.length + attendance.length + codes.length
+        });
+        
+        res.json(backup);
+        
+    } catch (error) {
+        log('error', 'Full backup error', error);
+        res.status(500).json({ message: 'Failed to create full backup' });
+    }
+}));
 
 // Handle 404
 app.use((req, res) => {

@@ -227,15 +227,187 @@
             <button class="logout-btn" onclick="logout()">Logout</button>
         </div>
         
-        <!-- PAGE 4: ADMIN DASHBOARD -->
-        <div id="adminDashboard" class="page">
-             <div class="card">
-                 <h1>Admin Dashboard</h1>
-                 <p>This is a placeholder for admin functionalities, such as viewing all users, courses, and system-wide statistics.</p>
-                 <button class="logout-btn" onclick="logout()">Logout</button>
+        
+<!-- PAGE 4: ENHANCED ADMIN DASHBOARD -->
+<div id="adminDashboard" class="page">
+    <!-- Overview Cards -->
+    <div class="admin-overview-grid">
+        <div class="overview-card">
+            <div class="overview-icon">👥</div>
+            <div class="overview-content">
+                <h3 id="totalStudents">0</h3>
+                <p>Total Students</p>
+            </div>
+        </div>
+        <div class="overview-card">
+            <div class="overview-icon">👨‍🏫</div>
+            <div class="overview-content">
+                <h3 id="totalLecturers">0</h3>
+                <p>Total Lecturers</p>
+            </div>
+        </div>
+        <div class="overview-card">
+            <div class="overview-icon">📚</div>
+            <div class="overview-content">
+                <h3 id="totalCourses">0</h3>
+                <p>Total Courses</p>
+            </div>
+        </div>
+        <div class="overview-card">
+            <div class="overview-icon">✅</div>
+            <div class="overview-content">
+                <h3 id="totalAttendance">0</h3>
+                <p>Attendance Records</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Management Tabs -->
+    <div class="card">
+        <h1>🛡️ Admin Dashboard</h1>
+        
+        <div class="admin-tabs">
+            <button class="admin-tab-btn active" onclick="switchAdminTab('students')">
+                👥 Students
+            </button>
+            <button class="admin-tab-btn" onclick="switchAdminTab('lecturers')">
+                👨‍🏫 Lecturers
+            </button>
+            <button class="admin-tab-btn" onclick="switchAdminTab('courses')">
+                📚 Courses
+            </button>
+            <button class="admin-tab-btn" onclick="switchAdminTab('reports')">
+                📊 Reports
+            </button>
+            <button class="admin-tab-btn" onclick="switchAdminTab('system')">
+                ⚙️ System
+            </button>
+        </div>
+
+        <!-- Students Management Tab -->
+        <div id="studentsTab" class="admin-tab-content active">
+            <div class="tab-header">
+                <h2>👥 Student Management</h2>
+                <button class="secondary-btn" onclick="refreshStudentsList()">🔄 Refresh</button>
+            </div>
+            
+            <div class="search-bar">
+                <input type="text" id="studentSearch" placeholder="🔍 Search by name or matric number..." 
+                       onkeyup="filterStudents()" class="search-input">
+            </div>
+            
+            <div id="studentsListContainer" class="data-table-container">
+                <div class="loading">Loading students...</div>
             </div>
         </div>
 
+        <!-- Lecturers Management Tab -->
+        <div id="lecturersTab" class="admin-tab-content">
+            <div class="tab-header">
+                <h2>👨‍🏫 Lecturer Management</h2>
+                <button class="secondary-btn" onclick="refreshLecturersList()">🔄 Refresh</button>
+            </div>
+            
+            <div class="search-bar">
+                <input type="text" id="lecturerSearch" placeholder="🔍 Search by name or email..." 
+                       onkeyup="filterLecturers()" class="search-input">
+            </div>
+            
+            <div id="lecturersListContainer" class="data-table-container">
+                <div class="loading">Loading lecturers...</div>
+            </div>
+        </div>
+
+        <!-- Courses Management Tab -->
+        <div id="coursesTab" class="admin-tab-content">
+            <div class="tab-header">
+                <h2>📚 Course Management</h2>
+                <button class="secondary-btn" onclick="refreshCoursesList()">🔄 Refresh</button>
+            </div>
+            
+            <div class="search-bar">
+                <input type="text" id="courseSearch" placeholder="🔍 Search by course code or title..." 
+                       onkeyup="filterCourses()" class="search-input">
+            </div>
+            
+            <div id="coursesListContainer" class="data-table-container">
+                <div class="loading">Loading courses...</div>
+            </div>
+        </div>
+
+        <!-- Reports Tab -->
+        <div id="reportsTab" class="admin-tab-content">
+            <h2>📊 System Reports</h2>
+            
+            <div class="report-options">
+                <div class="report-card" onclick="generateAttendanceReport()">
+                    <div class="report-icon">📈</div>
+                    <h3>Attendance Report</h3>
+                    <p>View attendance statistics by course, date, or student</p>
+                </div>
+                
+                <div class="report-card" onclick="generateActivityReport()">
+                    <div class="report-icon">📅</div>
+                    <h3>Activity Report</h3>
+                    <p>Recent system activity and code generations</p>
+                </div>
+                
+                <div class="report-card" onclick="exportAllData()">
+                    <div class="report-icon">💾</div>
+                    <h3>Data Export</h3>
+                    <p>Export all system data to CSV</p>
+                </div>
+            </div>
+            
+            <div id="reportResultsContainer"></div>
+        </div>
+
+        <!-- System Settings Tab -->
+        <div id="systemTab" class="admin-tab-content">
+            <h2>⚙️ System Settings & Monitoring</h2>
+            
+            <div class="system-section">
+                <h3>🖥️ System Health</h3>
+                <div id="systemHealthStatus">
+                    <div class="loading">Checking system status...</div>
+                </div>
+            </div>
+            
+            <div class="system-section">
+                <h3>🔧 Database Management</h3>
+                <button class="secondary-btn" onclick="testDatabaseConnection()">
+                    🔍 Test Database Connection
+                </button>
+                <button class="secondary-btn" onclick="viewActiveCodes()">
+                    🎫 View Active Codes
+                </button>
+                <div id="dbManagementResults"></div>
+            </div>
+            
+            <div class="system-section">
+                <h3>⚠️ Danger Zone</h3>
+                <button class="danger-btn" onclick="confirmClearExpiredCodes()">
+                    🗑️ Clear Expired Codes
+                </button>
+                <p class="warning-text">⚠️ This will remove all expired attendance codes from the database</p>
+            </div>
+        </div>
+    </div>
+    
+    <button class="logout-btn" onclick="logout()">Logout</button>
+</div>
+
+<!-- Delete Confirmation Modal -->
+<div id="deleteModal" class="modal">
+    <div class="modal-content">
+        <h3>⚠️ Confirm Deletion</h3>
+        <p id="deleteModalMessage"></p>
+        <div class="modal-actions">
+            <button class="danger-btn" id="confirmDeleteBtn">Delete</button>
+            <button class="secondary-btn" onclick="closeDeleteModal()">Cancel</button>
+        </div>
+    </div>
+</div>
     </div>
 
 <!-- Face-API.js Library -->
