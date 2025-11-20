@@ -595,28 +595,34 @@ async function detectFaceFlexible(imageElement, imageName) {
     return null;
 }
 
+
+// STRICTER FACIAL RECOGNITION THRESHOLDS
+// Replace the validateFaceMatch function in auth.js (around line 1100)
+// This makes it MUCH harder for siblings/similar faces to login
+// ============================================
+
 async function validateFaceMatch(registered, live, matNo) {
     try {
-        // REALISTIC THRESHOLDS based on real-world testing
-        const MINIMUM_THRESHOLD = 0.75;       // 25% HARD minimum (truly different people)
-        const LAPTOP_TO_MOBILE = 0.65;        // 35% (registered laptop, login mobile) 
-        const MOBILE_THRESHOLD = 0.60;        // 40% (mobile both ways)
-        const CROSSDEVICE_THRESHOLD = 0.55;   // 45% (different devices)
-        const STANDARD_THRESHOLD = 0.50;      // 50% (same device)
+        // STRICTER THRESHOLDS - Makes it harder for similar faces to match
+        const MINIMUM_THRESHOLD = 0.60;       // 40% HARD minimum (was 75% = 25%)
+        const LAPTOP_TO_MOBILE = 0.50;        // 50% (was 65% = 35%) 
+        const MOBILE_THRESHOLD = 0.45;        // 55% (was 60% = 40%)
+        const CROSSDEVICE_THRESHOLD = 0.40;   // 60% (was 55% = 45%)
+        const STANDARD_THRESHOLD = 0.35;      // 65% (was 50% = 50%)
 
         const distance = faceapi.euclideanDistance(registered.descriptor, live.descriptor);
         const similarity = ((1 - distance) * 100).toFixed(1);
         
-        console.log(`=== FACE MATCH for ${matNo} ===`);
+        console.log(`=== STRICTER FACE MATCH for ${matNo} ===`);
         console.log(`Similarity: ${similarity}%, Distance: ${distance}`);
 
-        // ABSOLUTE MINIMUM - Only blocks truly different people
+        // ABSOLUTE MINIMUM - Blocks truly different people AND siblings
         if (distance > MINIMUM_THRESHOLD) {
-            console.log('❌ REJECTED: Below 25% minimum - completely different person');
+            console.log('❌ REJECTED: Below 40% minimum - different person');
             return {
                 success: false,
                 similarity,
-                error: `Verification failed (${similarity}%).\n\nThis is clearly a different person (required: >25%).\n\nIf you are the correct person, re-register from this device.`
+                error: `Verification failed (${similarity}%).\n\nSimilarity too low (required: >40%).\n\nThis appears to be a different person.\n\nIf you are the correct person, re-register with better lighting.`
             };
         }
 
@@ -624,10 +630,8 @@ async function validateFaceMatch(registered, live, matNo) {
         const regBox = registered.detection.box;
         const liveBox = live.detection.box;
         
-        // Calculate multiple device indicators
         const sizeRatio = Math.max(regBox.width, regBox.height) / Math.max(liveBox.width, liveBox.height);
         const areaRatio = (regBox.width * regBox.height) / (liveBox.width * liveBox.height);
-        const aspectRatioDiff = Math.abs((regBox.width / regBox.height) - (liveBox.width / liveBox.height));
         
         const isDifferentDevice = sizeRatio < 0.65 || sizeRatio > 1.55 || areaRatio < 0.5 || areaRatio > 2.0;
         const hasLowConfidence = registered.detection.score < 0.3 || live.detection.score < 0.3;
@@ -638,106 +642,42 @@ async function validateFaceMatch(registered, live, matNo) {
             registered: `${regBox.width}x${regBox.height}`,
             live: `${liveBox.width}x${liveBox.height}`,
             sizeRatio: sizeRatio.toFixed(2),
-            areaRatio: areaRatio.toFixed(2),
-            aspectRatioDiff: aspectRatioDiff.toFixed(2),
             isDifferentDevice,
             isMobile,
-            isRegisteredLaptop,
-            regConfidence: registered.detection.score.toFixed(2),
-            liveConfidence: live.detection.score.toFixed(2)
+            isRegisteredLaptop
         });
         
-        // Determine threshold - BE VERY LENIENT for laptop→mobile
+        // Determine threshold - STRICTER
         let effectiveThreshold = STANDARD_THRESHOLD;
         let matchType = 'standard';
         
         if (isRegisteredLaptop && isMobile) {
-            // THIS IS YOUR CASE: Registered on laptop, logging in from phone
             effectiveThreshold = LAPTOP_TO_MOBILE;
             matchType = 'laptop-to-mobile';
-            console.log('🔵 LAPTOP→MOBILE scenario detected, using 35% threshold');
+            console.log('📱 LAPTOP→MOBILE: Using 50% threshold (STRICTER)');
         } else if (isMobile && isDifferentDevice) {
             effectiveThreshold = MOBILE_THRESHOLD;
             matchType = 'mobile-cross-device';
-            console.log('📱 Mobile cross-device, using 40% threshold');
+            console.log('📱 Mobile cross-device: Using 55% threshold (STRICTER)');
         } else if (isDifferentDevice || hasLowConfidence) {
             effectiveThreshold = CROSSDEVICE_THRESHOLD;
             matchType = 'cross-device';
-            console.log('🔄 Cross-device detected, using 45% threshold');
+            console.log('🔄 Cross-device: Using 60% threshold (STRICTER)');
         } else {
-            console.log('💻 Standard match, using 50% threshold');
+            console.log('💻 Standard match: Using 65% threshold (STRICTER)');
         }
 
-        // Main threshold check with generous buffer
+        // Main threshold check - NO BUFFER, NO LENIENCY
         if (distance > effectiveThreshold) {
-            const gap = distance - effectiveThreshold;
-            const similarityNum = parseFloat(similarity);
-            
-            console.log(`Gap from threshold: ${(gap * 100).toFixed(1)}%`);
-            
-            // LENIENT: If within 15% of threshold, check structure
-            if (gap < 0.15 && similarityNum >= 25) {
-                console.log('⚠️ Close to threshold, checking facial structure...');
-                const structural = await checkFacialStructure(registered, live);
-                
-                if (structural.passed) {
-                    console.log('✅ ACCEPTED via structural validation');
-                    return { 
-                        success: true, 
-                        similarity, 
-                        distance,
-                        method: 'structural-override',
-                        matchType,
-                        note: `Accepted at ${similarity}% via structural validation`
-                    };
-                } else {
-                    console.log(`❌ Structural check failed: ${structural.reason}`);
-                }
-            }
-            
-            // For laptop→mobile with 25-35%, be extra lenient
-            if (matchType === 'laptop-to-mobile' && similarityNum >= 25 && similarityNum < 35) {
-                console.log('🔍 Laptop→Mobile borderline case, checking proportions...');
-                const structural = await checkFacialStructure(registered, live);
-                
-                // Be more forgiving for structural check in this case
-                if (structural.passed || structural.reason.includes('differs by 2')) {
-                    console.log('✅ ACCEPTED: Laptop→Mobile with lenient structural check');
-                    return {
-                        success: true,
-                        similarity,
-                        distance,
-                        method: 'laptop-to-mobile-lenient',
-                        matchType,
-                        note: 'Cross-device compensation applied'
-                    };
-                }
-            }
-            
             console.log(`❌ REJECTED: ${similarity}% below ${matchType} threshold of ${((1-effectiveThreshold)*100).toFixed(0)}%`);
             
-            // Provide helpful guidance
             let errorMessage = `Verification failed (${similarity}%).\n\n`;
-            
-            if (matchType === 'laptop-to-mobile' && similarityNum < 30) {
-                errorMessage += `You registered on laptop but are using phone.\n\n` +
-                               `Your current match is too low (${similarity}%).\n\n` +
-                               `Solutions:\n` +
-                               `1. Re-register from your phone (recommended)\n` +
-                               `2. Use your laptop to login (85% match)\n` +
-                               `3. Try better lighting on phone\n\n` +
-                               `Mobile cameras create different descriptors than laptop cameras.`;
-            } else {
-                errorMessage += `Required: >${((1-effectiveThreshold)*100).toFixed(0)}% for ${matchType}\n\n` +
-                               `Current conditions:\n` +
-                               `• Detection quality: ${live.detection.score > 0.5 ? 'Good' : 'Poor'}\n` +
-                               `• Lighting: ${similarityNum < 30 ? 'Needs improvement' : 'Acceptable'}\n\n` +
-                               `Tips:\n` +
-                               `• Move to brighter area\n` +
-                               `• Face camera straight on\n` +
-                               `• Remove glasses/hat if different from registration\n` +
-                               `• Re-register from this device`;
-            }
+            errorMessage += `Required: >${((1-effectiveThreshold)*100).toFixed(0)}% for ${matchType}\n\n`;
+            errorMessage += `Solutions:\n`;
+            errorMessage += `• Improve lighting (face a window)\n`;
+            errorMessage += `• Remove glasses/hat if different from registration\n`;
+            errorMessage += `• Use the same device you registered on\n`;
+            errorMessage += `• Re-register from this device if needed`;
             
             return {
                 success: false,
@@ -746,26 +686,21 @@ async function validateFaceMatch(registered, live, matNo) {
             };
         }
 
-        // Structural validation for low matches (25-45%)
-        if (similarity < 45) {
-            console.log('🔍 Low similarity, validating facial structure...');
+        // MANDATORY STRUCTURAL VALIDATION for ALL matches below 70%
+        if (similarity < 70) {
+            console.log('🔍 MANDATORY structural validation (similarity < 70%)');
             const structural = await checkFacialStructure(registered, live);
             
             if (!structural.passed) {
-                // For laptop→mobile, be more lenient
-                if (matchType === 'laptop-to-mobile' && parseFloat(similarity) >= 30) {
-                    console.log('⚠️ Structural check failed but allowing for laptop→mobile at 30%+');
-                } else {
-                    console.log(`❌ REJECTED: Structural validation failed - ${structural.reason}`);
-                    return {
-                        success: false,
-                        similarity,
-                        error: `Facial structure mismatch (${similarity}%).\n\n${structural.reason}\n\nThis may be a different person.`
-                    };
-                }
-            } else {
-                console.log('✅ Structural validation passed');
+                console.log(`❌ REJECTED: Structural validation FAILED - ${structural.reason}`);
+                return {
+                    success: false,
+                    similarity,
+                    error: `Facial structure mismatch (${similarity}%).\n\n${structural.reason}\n\nThis may be a different person (possibly sibling/relative).\n\nRe-register if this is you.`
+                };
             }
+            
+            console.log('✅ Structural validation passed');
         }
 
         console.log(`✅ LOGIN ACCEPTED: ${matNo} at ${similarity}% (${matchType})`);
@@ -782,6 +717,7 @@ async function validateFaceMatch(registered, live, matNo) {
     }
 }
 
+// Replace checkFacialStructure function (around line 1250)
 async function checkFacialStructure(registered, live) {
     try {
         const regLandmarks = registered.landmarks.positions;
@@ -838,32 +774,32 @@ async function checkFacialStructure(registered, live) {
             noseDiff: (noseDiff * 100).toFixed(1) + '%'
         });
         
-        // BALANCED: Allow 30% variance for cross-device (was 20%)
-        const MAX_VARIANCE = 0.30;
-        const MAX_NOSE_VARIANCE = 0.35;
+        // STRICTER: Reduced from 30% to 20% variance (prevents siblings)
+        const MAX_VARIANCE = 0.20;  // Was 0.30
+        const MAX_NOSE_VARIANCE = 0.25;  // Was 0.35
         
         if (eyeDiff > MAX_VARIANCE) {
             return {
                 passed: false,
-                reason: `Eye spacing differs by ${(eyeDiff * 100).toFixed(0)}% (max ${(MAX_VARIANCE * 100)}%)`
+                reason: `Eye spacing differs by ${(eyeDiff * 100).toFixed(0)}% (max 20%). Likely different person.`
             };
         }
         
         if (widthDiff > MAX_VARIANCE) {
             return {
                 passed: false,
-                reason: `Face width differs by ${(widthDiff * 100).toFixed(0)}% (max ${(MAX_VARIANCE * 100)}%)`
+                reason: `Face width differs by ${(widthDiff * 100).toFixed(0)}% (max 20%). Likely different person.`
             };
         }
         
         if (noseDiff > MAX_NOSE_VARIANCE) {
             return {
                 passed: false,
-                reason: `Nose proportions differ by ${(noseDiff * 100).toFixed(0)}% (max ${(MAX_NOSE_VARIANCE * 100)}%)`
+                reason: `Nose proportions differ by ${(noseDiff * 100).toFixed(0)}% (max 25%). Likely different person.`
             };
         }
         
-        console.log('✓ All structural checks passed');
+        console.log('✅ All STRICT structural checks passed');
         return { passed: true };
         
     } catch (error) {
